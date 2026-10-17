@@ -13,6 +13,7 @@ actor AutoLearnService {
 
     private var replacementStore: WordReplacementStore?
     private var reviewer: AutoLearnAIReviewer?
+    private var modelContainer: ModelContainer?
     private var lifecycleGeneration: UInt64 = 0
     private var snapshotCancellationGeneration: UInt64 = 0
     private var activeToken: AutoLearnPasteToken?
@@ -33,6 +34,7 @@ actor AutoLearnService {
         guard replacementStore == nil else { return }
         let store = WordReplacementStore(modelContainer: modelContainer)
         replacementStore = store
+        self.modelContainer = modelContainer
         self.reviewer = reviewer
         observeProviderAvailability()
         do {
@@ -293,7 +295,21 @@ actor AutoLearnService {
                 text: text,
                 processID: processID
             )
-        else { return }
+        else {
+            guard lifecycleGeneration == generation, !Task.isCancelled, AutoLearnSettings.isEnabled,
+                UserDefaults.standard.object(forKey: "VoiceInkManualCorrectionHint") as? Bool ?? true,
+                let modelContainer else { return }
+            await MainActor.run {
+                NotificationManager.shared.showNotification(
+                    title: "この入力欄では自動学習できません。誤認識した語は手動で登録できます。",
+                    type: .warning, duration: 15,
+                    actionButton: ("修正を登録", {
+                        DictionaryQuickAddManager.shared.show(modelContainer: modelContainer, initialMode: .replacement)
+                    })
+                )
+            }
+            return
+        }
 
         guard lifecycleGeneration == generation,
             !Task.isCancelled,

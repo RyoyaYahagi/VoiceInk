@@ -14,6 +14,7 @@ struct DictionarySettingsPanel: View {
     @AppStorage(AutoLearnSettings.isEnabledKey) private var isAutoLearnDictionaryEnabled = true
     @AppStorage(AutoLearnSettings.reviewScheduleKey)
     private var reviewScheduleRawValue = AutoLearnReviewSchedule.immediately.rawValue
+    @AppStorage("VoiceInkManualCorrectionHint") private var manualCorrectionHint = true
     @State private var pendingCorrectionCount = 0
     @State private var pendingImport: DictionaryImportPayload?
     @State private var transferAlert: DictionaryTransferAlert?
@@ -31,6 +32,12 @@ struct DictionarySettingsPanel: View {
                 }
 
                 Section {
+                    Toggle("自動学習できない入力欄で手動登録の案内を表示", isOn: $manualCorrectionHint)
+                    Button("修正を手動で登録…") {
+                        DictionaryQuickAddManager.shared.show(modelContainer: modelContext.container, initialMode: .replacement)
+                    }
+                    Text("入力欄を読み取れない場合も、誤認識した語と正しい語を直接登録できます。登録した置換は次回の文字起こしから適用されます。")
+                        .font(.caption).foregroundStyle(.secondary)
                     Toggle("Auto-Learn Dictionary", isOn: $isAutoLearnDictionaryEnabled)
                         .onChange(of: isAutoLearnDictionaryEnabled) { _, isEnabled in
                             Task {

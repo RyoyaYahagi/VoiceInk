@@ -19,12 +19,12 @@ final class DictionaryQuickAddManager {
         isVisible ? hide() : show(modelContainer: modelContainer)
     }
 
-    func show(modelContainer: ModelContainer) {
+    func show(modelContainer: ModelContainer, initialMode: DictionaryQuickAddView.Mode = .vocabulary) {
         guard !isVisible else { return }
 
         previousApp = NSWorkspace.shared.frontmostApplication
 
-        let initialSize = NSSize(width: 500, height: DictionaryQuickAddView.Mode.vocabulary.panelHeight)
+        let initialSize = NSSize(width: 500, height: initialMode.panelHeight)
         let newPanel = PersistentQuickPanel(
             size: initialSize,
             positionDefaultsKey: "VoiceInkDictionaryQuickAddOrigin",
@@ -38,6 +38,7 @@ final class DictionaryQuickAddManager {
         }
 
         let view = DictionaryQuickAddView(
+            initialMode: initialMode,
             onDismiss: { [weak self] in self?.hide() },
             onResize: { [weak self] height in
                 self?.panel?.resizeKeepingTopEdge(to: NSSize(width: 500, height: height))
@@ -110,6 +111,12 @@ struct DictionaryQuickAddView: View {
     let onDismiss: () -> Void
     let onResize: (CGFloat) -> Void
 
+    init(initialMode: Mode = .vocabulary, onDismiss: @escaping () -> Void, onResize: @escaping (CGFloat) -> Void) {
+        _mode = State(initialValue: initialMode)
+        self.onDismiss = onDismiss
+        self.onResize = onResize
+    }
+
     var body: some View {
         QuickPanelScaffold {
             VStack(spacing: 0) {
@@ -141,7 +148,7 @@ struct DictionaryQuickAddView: View {
             return .handled
         }
         .onAppear {
-            DispatchQueue.main.async { focusedField = .word }
+            DispatchQueue.main.async { focusedField = mode == .vocabulary ? .word : .original }
         }
         .onChange(of: mode) { _, newMode in
             wordInput = ""
