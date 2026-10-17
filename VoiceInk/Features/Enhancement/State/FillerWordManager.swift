@@ -4,8 +4,18 @@ class FillerWordManager: ObservableObject {
     static let shared = FillerWordManager()
 
     static let defaultFillerWords = [
+        // 英語（空白で語を区切る言語）
         "uh", "um", "uhm", "umm", "uhh", "uhhh",
         "hmm", "hm", "mmm", "mm", "mh", "ehh",
+        // 日本語（空白で語を区切らない言語）。表記の揺れは個別に列挙する。
+        "えーと", "えーっと", "ええと", "えっと",
+        "あのー", "あのね", "あの",
+        "うーん", "んー", "んっと",
+        "そのー", "その",
+        "えー", "あー",
+        "まあ", "まー",
+        "なんか", "なんというか", "なんていうか",
+        "っていうか", "ていうか",
     ]
 
     private let fillerWordsKey = "FillerWords"
