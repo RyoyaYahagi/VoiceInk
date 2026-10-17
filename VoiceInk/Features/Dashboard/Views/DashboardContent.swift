@@ -237,6 +237,8 @@ struct DashboardContent: View {
 
             greetingHeader
 
+            ProviderUsageView()
+
             nameEditorDismissArea {
                 heroSection
             }

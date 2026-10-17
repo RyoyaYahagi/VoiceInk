@@ -101,17 +101,11 @@ class TranscriptionPipeline {
 
         do {
             let transcriptionStart = Date()
-            var text: String
-            if let session {
-                text = try await session.transcribe(audioURL: audioURL)
-            } else {
-                text = try await serviceRegistry.transcribe(
-                    audioURL: audioURL,
-                    model: model,
-                    context: transcriptionConfiguration.requestContext
-                )
-            }
-            text = TranscriptionOutputFilter.filter(text)
+            let result = try await serviceRegistry.transcribeRecording(
+                audioURL: audioURL, configuration: transcriptionConfiguration,
+                session: session, shouldCancel: shouldCancel
+            )
+            var text = TranscriptionOutputFilter.filter(result.text)
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
 
             if shouldCancel() {
@@ -146,7 +140,7 @@ class TranscriptionPipeline {
 
             transcription.text = cleanedText
             transcription.duration = actualDuration
-            transcription.transcriptionModelName = model.displayName
+            transcription.transcriptionModelName = result.modelName
             transcription.transcriptionDuration = transcriptionDuration
             transcription.modeName = modeMetadata.name
             transcription.modeEmoji = modeMetadata.emoji

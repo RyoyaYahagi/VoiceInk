@@ -34,6 +34,11 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            LocalRecoverySettingsView()
+            DictionaryAutomaticBackupSettings()
+            Section {
+                ProviderUsageView()
+            }
             Section {
                 LabeledContent("Primary Shortcut") {
                     HStack(spacing: 8) {
