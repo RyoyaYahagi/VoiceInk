@@ -20,6 +20,8 @@ actor AutoLearnService {
     private var activeProcessID: pid_t?
     private var deadlineTask: Task<Void, Never>?
     private var focusFinalizationTask: Task<Void, Never>?
+    /// 見張り中に入力欄のテキストを定期的に控え直すタスク。
+    private var samplingTask: Task<Void, Never>?
     private var reviewTask: Task<Void, Never>?
     private var reviewGeneration: UInt64 = 0
     private var claimedCandidateIDs = Set<UUID>()
@@ -231,6 +233,8 @@ actor AutoLearnService {
         deadlineTask = nil
         focusFinalizationTask?.cancel()
         focusFinalizationTask = nil
+        samplingTask?.cancel()
+        samplingTask = nil
         focusObserver.stop()
         activeToken = nil
         activeGeneration = nil
@@ -311,6 +315,28 @@ actor AutoLearnService {
             token: token,
             after: AutoLearnLimits.observationDurationNanoseconds
         )
+        startSnapshotSampling(token: token)
+    }
+
+    /// 見張り中、入力欄のテキストを定期的に読み直して控えておく。
+    /// Web 系アプリで確定時までに要素が読めなくなる場合の保険。
+    private func startSnapshotSampling(token: AutoLearnPasteToken) {
+        samplingTask?.cancel()
+        samplingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let interval = AutoLearnLimits.snapshotSamplingIntervalNanoseconds
+                guard await self.sleep(nanoseconds: interval) else { return }
+                guard await self.sampleSnapshotIfActive(token: token) else { return }
+            }
+        }
+    }
+
+    /// 1 回分の読み直し。セッションが続いていれば true を返す。
+    private func sampleSnapshotIfActive(token: AutoLearnPasteToken) async -> Bool {
+        guard activeToken == token, AutoLearnSettings.isEnabled else { return false }
+        await accessibilityRuntime.refreshSnapshot(token: token)
+        return true
     }
 
     private func discardActiveSession() async {
@@ -320,6 +346,8 @@ actor AutoLearnService {
         deadlineTask = nil
         focusFinalizationTask?.cancel()
         focusFinalizationTask = nil
+        samplingTask?.cancel()
+        samplingTask = nil
         focusObserver.stop()
         activeToken = nil
         activeGeneration = nil
@@ -340,6 +368,8 @@ actor AutoLearnService {
         deadlineTask = nil
         focusFinalizationTask?.cancel()
         focusFinalizationTask = nil
+        samplingTask?.cancel()
+        samplingTask = nil
         focusObserver.stop()
 
         if persist {
@@ -365,7 +395,11 @@ actor AutoLearnService {
             return
         }
 
-        guard !(await accessibilityRuntime.targetIsFocused(token: token)) else { return }
+        guard !(await accessibilityRuntime.targetIsFocused(token: token)) else {
+            logger.notice("Auto Learn focus change ignored: target still focused")
+            return
+        }
+        logger.notice("Auto Learn finalizing: focus left target")
         await completeSession(token: token, persist: true)
     }
 
@@ -382,6 +416,7 @@ actor AutoLearnService {
 
     private func finalizeAtDeadline(token: AutoLearnPasteToken) async {
         guard activeToken == token, AutoLearnSettings.isEnabled else { return }
+        logger.notice("Auto Learn finalizing: observation deadline reached")
         await completeSession(token: token, persist: true)
     }
 
@@ -390,9 +425,15 @@ actor AutoLearnService {
             let snapshot
         else { return }
 
-        guard let revision = FinalSnapshotDiffEngine.revision(from: snapshot) else { return }
+        guard let revision = FinalSnapshotDiffEngine.revision(from: snapshot) else {
+            logger.notice("Auto Learn diff skipped: revision unavailable")
+            return
+        }
         let candidates = CorrectionDiffEngine.candidates(from: revision)
-        guard !candidates.isEmpty else { return }
+        guard !candidates.isEmpty else {
+            logger.notice("Auto Learn diff skipped: no correction candidates")
+            return
+        }
 
         do {
             let insertedCount = try await pendingQueue.enqueue(candidates)

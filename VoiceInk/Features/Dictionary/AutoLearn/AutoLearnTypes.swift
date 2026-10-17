@@ -173,6 +173,9 @@ enum AutoLearnReviewSchedule: String, CaseIterable, Identifiable {
 
 enum AutoLearnLimits {
     static let observationDurationNanoseconds: UInt64 = 60_000_000_000
+    /// 見張り中に入力欄のテキストを控え直す間隔。
+    /// Web 系アプリでは確定時までに要素が読めなくなることがあるため。
+    static let snapshotSamplingIntervalNanoseconds: UInt64 = 1_000_000_000
     static let verificationDelayNanoseconds: UInt64 = 120_000_000
     static let focusChangeGraceNanoseconds: UInt64 = 250_000_000
     static let accessibilityTimeoutSeconds: Float = 0.20

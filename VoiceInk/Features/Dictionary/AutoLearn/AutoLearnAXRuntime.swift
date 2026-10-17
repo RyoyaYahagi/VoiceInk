@@ -10,6 +10,10 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
         let baselineFieldText: String
         let pastedRange: NSRange
         let pastedText: String
+        /// 見張り中に最後まで読めていた入力欄のテキスト。
+        /// Web 系アプリでは確定時までに要素が作り直されて読めなくなることがあるため、
+        /// 読めた時点の値を残しておき、確定時の代わりに使う。
+        var lastReadableText: String?
     }
 
     private let queue = DispatchQueue(label: "com.prakashjoshipax.voiceink.auto-learn.accessibility")
@@ -23,6 +27,9 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
     func capturePastedText(text: String, processID: pid_t) async -> AutoLearnPasteToken? {
         await perform { [self] in
             session = nil
+            logger.notice(
+                "Auto Learn capture attempt pid=\(processID, privacy: .public) chars=\(text.count, privacy: .public)"
+            )
 
             guard AXIsProcessTrusted() else { return rejectCapture("accessibility-not-trusted") }
             guard processID != ProcessInfo.processInfo.processIdentifier else {
@@ -72,22 +79,56 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
                 targetElement: reading.targetElement,
                 baselineFieldText: fieldText,
                 pastedRange: pastedRange,
-                pastedText: observedPastedText
+                pastedText: observedPastedText,
+                lastReadableText: fieldText
+            )
+            logger.notice(
+                "Auto Learn observation armed fieldChars=\(fieldText.utf16.count, privacy: .public) pastedChars=\(observedPastedText.count, privacy: .public)"
             )
             return token
         }
     }
 
+    /// 見張り中に定期的に呼び、読めた入力欄のテキストを控えておく。
+    func refreshSnapshot(token: AutoLearnPasteToken) async {
+        await perform { [self] in
+            guard var active = session, active.token == token else { return }
+            guard let value = textReader.textValue(from: active.targetElement) else { return }
+            active.lastReadableText = value.text
+            session = active
+        }
+    }
+
     func finishSnapshot(token: AutoLearnPasteToken) async -> AutoLearnFieldSnapshot? {
         await perform { [self] in
-            guard let active = session, active.token == token else { return nil }
+            guard let active = session, active.token == token else {
+                logger.notice("Auto Learn snapshot skipped: no active session")
+                return nil
+            }
             session = nil
 
             defer { textReader.restoreWebAccessibility(processID: AXProcessID(active.appElement), appElement: active.appElement) }
-            guard let finalTextValue = textReader.textValue(from: active.targetElement) else { return nil }
-            let finalFieldText = finalTextValue.text
-            guard finalFieldText.utf16.count <= AutoLearnLimits.maximumFieldUTF16Length else { return nil }
-            guard !textIsExactlyEqual(finalFieldText, active.baselineFieldText) else { return nil }
+            let finalFieldText: String
+            if let finalTextValue = textReader.textValue(from: active.targetElement) {
+                finalFieldText = finalTextValue.text
+            } else if let lastReadableText = active.lastReadableText {
+                logger.notice("Auto Learn snapshot recovered from the last readable value")
+                finalFieldText = lastReadableText
+            } else {
+                logger.notice("Auto Learn snapshot skipped: target text unreadable")
+                return nil
+            }
+            guard finalFieldText.utf16.count <= AutoLearnLimits.maximumFieldUTF16Length else {
+                logger.notice("Auto Learn snapshot skipped: field too large")
+                return nil
+            }
+            guard !textIsExactlyEqual(finalFieldText, active.baselineFieldText) else {
+                logger.notice("Auto Learn snapshot skipped: field text unchanged")
+                return nil
+            }
+            logger.notice(
+                "Auto Learn snapshot captured baselineChars=\(active.baselineFieldText.utf16.count, privacy: .public) finalChars=\(finalFieldText.utf16.count, privacy: .public)"
+            )
 
             return AutoLearnFieldSnapshot(
                 baselineFieldText: active.baselineFieldText,
