@@ -1,6 +1,8 @@
 import Foundation
 
-let voiceInkRefineXPCServiceName = "com.prakashjoshipax.VoiceInk.RefineXPC"
+let voiceInkRefineXPCServiceName =
+    Bundle.main.object(forInfoDictionaryKey: "VoiceInkRefineXPCServiceName") as? String
+    ?? "com.prakashjoshipax.VoiceInk.RefineXPC"
 let voiceInkRefineXPCErrorDomain = "com.prakashjoshipax.VoiceInk.RefineXPC"
 
 struct VoiceInkRefinePrepareRequest: Codable, Sendable {

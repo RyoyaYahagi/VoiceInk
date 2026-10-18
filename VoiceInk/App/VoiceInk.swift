@@ -44,6 +44,9 @@ struct VoiceInkApp: App {
         // Disable HTTP response caching — prevents API responses from being stored in Cache.db
         URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0)
 
+        #if LOCAL_BUILD
+            Self.migrateUserDefaultsIfNeeded()
+        #endif
         AppDefaults.registerDefaults()
         AppLanguagePreference.applyStored()
         AppAppearancePreference.applyStored()
@@ -225,6 +228,35 @@ struct VoiceInkApp: App {
         return lines.joined(separator: "\n")
     }
 
+    private static func migrateUserDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        let migrationKey = "VoiceInkDidMigrateLegacyBundleDefaults"
+        let legacyDomain = "com.prakashjoshipax.VoiceInk"
+        guard let currentDomain = Bundle.main.bundleIdentifier else { return }
+        let currentValues = defaults.persistentDomain(forName: currentDomain) ?? [:]
+        guard currentValues[migrationKey] == nil else { return }
+
+        let legacyDefaults = UserDefaults(suiteName: legacyDomain)
+        var legacyValues = legacyDefaults?.persistentDomain(forName: legacyDomain) ?? [:]
+
+        // Read only the legacy app's preference file if the defaults domain is unavailable or empty.
+        if legacyValues.isEmpty {
+            let legacyPlistURL = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Preferences/\(legacyDomain).plist")
+            if let data = try? Data(contentsOf: legacyPlistURL),
+                let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+                let values = plist as? [String: Any]
+            {
+                legacyValues = values
+            }
+        }
+
+        for (key, value) in legacyValues where currentValues[key] == nil {
+            defaults.set(value, forKey: key)
+        }
+        defaults.set(true, forKey: migrationKey)
+    }
+
     private static func createPersistentContainer(schema: Schema, logger: Logger) throws -> ModelContainer {
         let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("com.prakashjoshipax.VoiceInk", isDirectory: true)
@@ -245,8 +277,11 @@ struct VoiceInkApp: App {
 
         let dictionarySchema = Schema([VocabularyWord.self, WordReplacement.self])
         // Dev shares the local stores but must never connect to CloudKit.
-        #if DEBUG || LOCAL_BUILD
+        #if DEBUG
             let dictionaryCloudKit: ModelConfiguration.CloudKitDatabase = .none
+        #elseif LOCAL_BUILD
+            let dictionaryCloudKit: ModelConfiguration.CloudKitDatabase = .private(
+                "iCloud.com.ryoyayahagi.KoeInk")
         #else
             let dictionaryCloudKit: ModelConfiguration.CloudKitDatabase = .private(
                 "iCloud.com.prakashjoshipax.VoiceInk")
