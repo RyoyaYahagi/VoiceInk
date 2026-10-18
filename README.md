@@ -54,6 +54,61 @@ brew install --cask voiceink
 ### Build from Source
 As an open-source project, you can build VoiceInk yourself by following the instructions in [BUILDING.md](BUILDING.md). However, the compiled version includes additional benefits like automatic updates, priority support via Discord and email, and helps fund ongoing development.
 
+## このフォークを使う場合のビルドと起動（日本語）
+
+このフォーク（`RyoyaYahagi/VoiceInk`、ブランチ `local/mac-customizations`）は配布版と同じ
+`make local` でビルドするが、**起動手順に 1 点だけ違いがある**: 成果物は `~/Downloads/VoiceInk.app`
+に作られるので、ランチャー（Raycast など）やアクセシビリティ許可の管理で standard に扱うため
+`/Applications` に置くこと。
+
+### ビルドから起動まで
+
+前提: Xcode（現在 Xcode 27 / Swift 6.4）、Homebrew が導入済みであること。初回は Metal
+ツールチェーンが必要になる場合がある（`xcodebuild -downloadComponent MetalToolchain`）。
+
+```shell
+# 1. 依存物の確認（whisper.cpp の XCFramework が無ければ自動構築される）
+make check
+
+# 2. ローカルビルド（約 8 分。毎回フルビルドになる）
+make local
+
+# 3. 起動中の VoiceInk を終了してから、確実に新しい方を使わせる
+osascript -e 'tell application "VoiceInk" to quit'
+rm -rf /Applications/VoiceInk.app
+ditto ~/Downloads/VoiceInk.app /Applications/VoiceInk.app
+xattr -cr /Applications/VoiceInk.app   # 隔離属性の除去
+open -a /Applications/VoiceInk.app
+```
+
+```shell
+# この Mac 用の 1 コマンド版（上記の 2〜3 を自動化）
+voiceink-rebuild           # ビルドしない場合は --skip-build
+```
+
+実装は `~/.local/bin/voiceink-rebuild`（このリポジトリには含まれない）。
+
+### よく出る確認ダイアログ
+
+- **キーチェーンの確認**（「VoiceInkがキーチェーン内の "`com.prakashjoshipax.VoiceInk.Local`"
+  の…を使用しようとしています」）: ローカルビルドが API キーやライセンスキーを保存・読み出す
+  ときに macOS が確認しているだけ。**「常に許可」か「許可」で問題ない**。ad-hoc 署名や別の
+  署名に変えるたびに再確認を求められるが、安定した Apple Development 証明書（`make local`
+  が自動で選ぶ）で署名されていれば再表示されない。
+- **アクセシビリティ／マイクの許可**: 署名を変えてインストールし直すたびにやり直しが必要。
+  安定した証明書を 1 つ使い続ければ再設定は不要。
+
+### ローカルビルドの制約
+
+- ライセンス判定は常に「購入済み」になる（`#if LOCAL_BUILD` のブロックによる）。
+- iCloud 辞書同期と自動更新は無効。更新は `git pull` して再ビルドする。
+- API キーの保存先が配布版と別のキーチェーン名前空間
+  （`com.prakashjoshipax.VoiceInk.Local`）なので、配布版で入れたキーは引き継がれない。
+- bundle id は配布版と同じなので、履歴・辞書・設定はどちらでも共有される。
+  `~/Library/Application Support/com.prakashjoshipax.VoiceInk/` と
+  `~/Library/Preferences/com.prakashjoshipax.VoiceInk.plist` は消さないこと。
+
+
 ## Requirements
 
 - macOS 15.0 or later
