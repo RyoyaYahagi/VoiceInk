@@ -80,7 +80,7 @@ struct EstimatedCostView: View {
             Text("\(total, format: .currency(code: "USD"))")
                 .font(.caption)
                 .monospacedDigit()
-                .foregroundStyle(total > 0 ? AppTheme.Status.warning : .secondary)
+                .foregroundStyle(total > 0 ? AppTheme.Text.primary : .secondary)
         }
         .help(helpText(
             transcription: transcription,
