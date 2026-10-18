@@ -31,6 +31,18 @@ struct AutoLearnPasteToken: Hashable, Sendable {
     let id: UUID
 }
 
+/// Outcome of one paste observation attempt. Rejected keeps only the reason key.
+enum AutoLearnCaptureOutcome: Sendable {
+    case armed(AutoLearnPasteToken)
+    case rejected(String)
+}
+
+/// Outcome of one observation finalization. Skipped keeps only the reason key.
+enum AutoLearnSnapshotOutcome: Sendable {
+    case snapshot(AutoLearnFieldSnapshot)
+    case skipped(String)
+}
+
 struct AutoLearnRevision: Sendable {
     let original: String
     let corrected: String

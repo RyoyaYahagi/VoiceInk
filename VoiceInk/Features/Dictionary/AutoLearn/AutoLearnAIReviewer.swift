@@ -121,11 +121,30 @@ final class AutoLearnAIReviewer: @unchecked Sendable {
         logger.notice(
             "Auto Learn review started provider=\(provider.rawValue, privacy: .public) model=\(loggedModelName, privacy: .public) candidates=\(candidates.count, privacy: .public)"
         )
-        let responseText = try await aiService.reviewAutoLearnCandidates(
-            payload: requestText,
-            systemPrompt: Self.reviewPrompt,
+        let responseText: String
+        do {
+            responseText = try await aiService.reviewAutoLearnCandidates(
+                payload: requestText,
+                systemPrompt: Self.reviewPrompt,
+                provider: provider,
+                modelName: modelName
+            )
+        } catch {
+            await recordReviewUsage(
+                provider: provider,
+                modelName: loggedModelName,
+                candidates: candidates,
+                requestText: requestText,
+                responseText: nil
+            )
+            throw error
+        }
+        await recordReviewUsage(
             provider: provider,
-            modelName: modelName
+            modelName: loggedModelName,
+            candidates: candidates,
+            requestText: requestText,
+            responseText: responseText
         )
         let candidateReviewDecisions = try decodeResponse(
             responseText,
@@ -472,4 +491,31 @@ final class AutoLearnAIReviewer: @unchecked Sendable {
         Allowed actions are addReplacementAndVocabulary, addReplacementOnly, addVocabularyOnly, and rejectCorrection. Copy every integer candidateID exactly and return each input candidateID at least once. Repeat an ID only for independent accepted corrections.
 
         """
+
+    /// Characters of the fixed system prompt, counted the same way as
+    /// `EstimatedTokenCounter` for usage estimation.
+    var reviewPromptCharacterCount: Int {
+        Self.reviewPrompt.utf16.count
+    }
+
+    /// Records one review run for the estimated-cost view. Per-candidate text
+    /// is converted to a character count only; no text is stored.
+    private func recordReviewUsage(
+        provider: AIProvider,
+        modelName: String,
+        candidates: [AutoLearnReviewCandidate],
+        requestText: String,
+        responseText: String?
+    ) async {
+        let requestChars = Self.reviewPrompt.utf16.count + requestText.utf16.count
+        await MainActor.run {
+            AutoLearnStatsStore.shared.recordReviewRun(
+                provider: provider.rawValue,
+                modelName: modelName,
+                candidates: candidates.count,
+                requestChars: requestChars,
+                responseChars: responseText?.utf16.count ?? 0
+            )
+        }
+    }
 }

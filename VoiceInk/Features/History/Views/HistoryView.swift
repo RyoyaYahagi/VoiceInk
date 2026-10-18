@@ -261,6 +261,36 @@ struct HistoryView: View {
                     showsCopyButton: true
                 )
                 .id(transcription.id)
+                .contextMenu {
+                    if !transcription.preferredHistoryText.isEmpty {
+                        Button {
+                            ClipboardManager.copyToClipboard(transcription.preferredHistoryText)
+                        } label: {
+                            Label("テキストをコピー", systemImage: "doc.on.doc")
+                        }
+                    }
+                    Button {
+                        openDetail(transcription)
+                    } label: {
+                        Label("詳細を開く", systemImage: "rectangle.expand.vertical")
+                    }
+                    Divider()
+                    Button {
+                        DictionaryQuickAddManager.shared.show(
+                            modelContainer: modelContext.container,
+                            initialMode: .replacement,
+                            referenceText: transcription.preferredHistoryText
+                        )
+                    } label: {
+                        Label("辞書に修正を登録", systemImage: "text.badge.plus")
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        performDeletion(for: transcription)
+                    } label: {
+                        Label("削除", systemImage: "trash")
+                    }
+                }
             }
 
             if hasMoreContent {

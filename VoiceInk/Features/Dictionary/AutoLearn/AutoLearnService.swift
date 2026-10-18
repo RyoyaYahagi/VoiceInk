@@ -19,6 +19,10 @@ actor AutoLearnService {
     private var activeToken: AutoLearnPasteToken?
     private var activeGeneration: UInt64?
     private var activeProcessID: pid_t?
+    private var activeApp: AutoLearnAppIdentity?
+    /// App identity kept for the session being finalized; active state is
+    /// cleared before `persistFinishedSession` runs.
+    private var lastFinalizedApp: (token: AutoLearnPasteToken, app: AutoLearnAppIdentity)?
     private var deadlineTask: Task<Void, Never>?
     private var focusFinalizationTask: Task<Void, Never>?
     /// 見張り中に入力欄のテキストを定期的に控え直すタスク。
@@ -217,7 +221,12 @@ actor AutoLearnService {
         await discardActiveSession()
     }
 
-    func pasteDidFinish(text: String, processID: pid_t?, commandPosted: Bool) async -> UInt64? {
+    func pasteDidFinish(
+        text: String,
+        processID: pid_t?,
+        app: AutoLearnAppIdentity,
+        commandPosted: Bool
+    ) async -> UInt64? {
         guard AutoLearnSettings.isEnabled,
             replacementStore != nil,
             commandPosted,
@@ -229,6 +238,9 @@ actor AutoLearnService {
         // Finalize the previous session after Command-V so Accessibility and
         // SwiftData work do not delay the paste.
         let previousToken = activeToken
+        if let previousToken {
+            lastFinalizedApp = (previousToken, activeApp ?? lastFinalizedApp?.app ?? .unknown)
+        }
         lifecycleGeneration &+= 1
         let generation = lifecycleGeneration
         deadlineTask?.cancel()
@@ -241,6 +253,7 @@ actor AutoLearnService {
         activeToken = nil
         activeGeneration = nil
         activeProcessID = nil
+        activeApp = nil
 
         guard lifecycleGeneration == generation, AutoLearnSettings.isEnabled else { return nil }
 
@@ -253,6 +266,7 @@ actor AutoLearnService {
             await self?.beginObservation(
                 text: text,
                 processID: processID,
+                app: app,
                 generation: generation
             )
         }
@@ -283,6 +297,7 @@ actor AutoLearnService {
     private func beginObservation(
         text: String,
         processID: pid_t,
+        app: AutoLearnAppIdentity,
         generation: UInt64
     ) async {
         guard await sleep(nanoseconds: AutoLearnLimits.verificationDelayNanoseconds),
@@ -291,11 +306,15 @@ actor AutoLearnService {
             AutoLearnSettings.isEnabled
         else { return }
 
-        guard let token = await accessibilityRuntime.capturePastedText(
-                text: text,
-                processID: processID
-            )
-        else {
+        let token: AutoLearnPasteToken
+        switch await accessibilityRuntime.capturePastedText(
+            text: text,
+            processID: processID
+        ) {
+        case .rejected(let reason):
+            await MainActor.run {
+                AutoLearnStatsStore.shared.recordCaptureFailure(reason: reason, app: app)
+            }
             guard lifecycleGeneration == generation, !Task.isCancelled, AutoLearnSettings.isEnabled,
                 UserDefaults.standard.object(forKey: "VoiceInkManualCorrectionHint") as? Bool ?? true,
                 let modelContainer else { return }
@@ -309,6 +328,11 @@ actor AutoLearnService {
                 )
             }
             return
+        case .armed(let armedToken):
+            await MainActor.run {
+                AutoLearnStatsStore.shared.recordObservationArmed(app: app)
+            }
+            token = armedToken
         }
 
         guard lifecycleGeneration == generation,
@@ -322,6 +346,7 @@ actor AutoLearnService {
         activeToken = token
         activeGeneration = generation
         activeProcessID = processID
+        activeApp = app
         focusObserver.start(processID: processID, token: token) { token in
             Task {
                 await AutoLearnService.shared.focusMayHaveChanged(token: token)
@@ -368,6 +393,7 @@ actor AutoLearnService {
         activeToken = nil
         activeGeneration = nil
         activeProcessID = nil
+        activeApp = nil
         if let token {
             await accessibilityRuntime.discard(token: token)
         } else {
@@ -378,6 +404,7 @@ actor AutoLearnService {
     private func completeSession(token: AutoLearnPasteToken, persist: Bool) async {
         guard activeToken == token, activeGeneration != nil else { return }
         deadlineTask?.cancel()
+        lastFinalizedApp = (token, activeApp ?? .unknown)
         activeToken = nil
         activeGeneration = nil
         activeProcessID = nil
@@ -397,9 +424,19 @@ actor AutoLearnService {
 
     private func persistFinishedSession(token: AutoLearnPasteToken) async {
         let cancellationGeneration = snapshotCancellationGeneration
-        let snapshot = await accessibilityRuntime.finishSnapshot(token: token)
+        let outcome = await accessibilityRuntime.finishSnapshot(token: token)
         guard snapshotCancellationGeneration == cancellationGeneration else { return }
-        await persistSnapshot(snapshot)
+        // 入力欄が読めなくなった場合などの打ち切り理由を、テキストなしで記録する。
+        let finalizedApp = lastFinalizedApp
+        if lastFinalizedApp?.token == token {
+            lastFinalizedApp = nil
+        }
+        if case .skipped(let reason) = outcome, let finalizedApp {
+            await MainActor.run {
+                AutoLearnStatsStore.shared.recordFieldReadFailure(reason: reason, app: finalizedApp.app)
+            }
+        }
+        await persistSnapshot(outcome, app: finalizedApp?.app)
     }
 
     private func finalizeIfFocusLeft(token: AutoLearnPasteToken) async {
@@ -436,13 +473,20 @@ actor AutoLearnService {
         await completeSession(token: token, persist: true)
     }
 
-    private func persistSnapshot(_ snapshot: AutoLearnFieldSnapshot?) async {
-        guard AutoLearnSettings.isEnabled,
-            let snapshot
-        else { return }
+    private func persistSnapshot(
+        _ outcome: AutoLearnSnapshotOutcome,
+        app identity: AutoLearnAppIdentity?
+    ) async {
+        guard AutoLearnSettings.isEnabled else { return }
+        guard case .snapshot(let snapshot) = outcome else { return }
 
         guard let revision = FinalSnapshotDiffEngine.revision(from: snapshot) else {
             logger.notice("Auto Learn diff skipped: revision unavailable")
+            if let identity {
+                await MainActor.run {
+                    AutoLearnStatsStore.shared.recordFieldReadFailure(reason: "revision-unavailable", app: identity)
+                }
+            }
             return
         }
         let candidates = CorrectionDiffEngine.candidates(from: revision)
@@ -457,6 +501,11 @@ actor AutoLearnService {
                 logger.notice(
                     "Queued \(insertedCount, privacy: .public) Auto Learn candidate(s) for AI review"
                 )
+                if let identity {
+                    await MainActor.run {
+                        AutoLearnStatsStore.shared.recordCandidatesQueued(insertedCount, app: identity)
+                    }
+                }
                 await schedulePendingReview()
             }
             await notifyQueueChanged()

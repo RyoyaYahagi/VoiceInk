@@ -237,12 +237,12 @@ class TranscriptionPipeline {
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
         }
 
-        func saveTranscriptionAndPostCompletion() {
+        func saveTranscriptionAndPostCompletion() async {
             var didInsertSessionMetric = false
 
             if transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue {
                 do {
-                    didInsertSessionMetric = try SessionMetricRecorder.recordRecorderSession(
+                    didInsertSessionMetric = try await SessionMetricRecorder.recordRecorderSession(
                         transcription: transcription,
                         model: model,
                         in: modelContext
@@ -287,7 +287,7 @@ class TranscriptionPipeline {
             )
         )
 
-        saveTranscriptionAndPostCompletion()
+        await saveTranscriptionAndPostCompletion()
     }
 
     private func metadata(for mode: ModeConfig?) -> (name: String?, emoji: String?) {

@@ -94,6 +94,7 @@ class CursorPaster {
 
         let application = NSWorkspace.shared.frontmostApplication
         let appIdentifier = application?.bundleIdentifier ?? "unknown"
+        let appName = application?.localizedName ?? appIdentifier
         let pasteResult = await deliverText(textToDeliver, method: method, sessionID: sessionID)
         logger.notice(
             "Paste id=\(sessionID, privacy: .public) app=\(appIdentifier, privacy: .public) method=\(method.rawValue, privacy: .public) commandPosted=\(pasteResult.didPostPasteCommand, privacy: .public) queueMs=\(queueWaitMs, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt), privacy: .public)"
@@ -103,6 +104,7 @@ class CursorPaster {
             autoLearnGeneration = await AutoLearnService.shared.pasteDidFinish(
                 text: textToDeliver,
                 processID: application?.processIdentifier,
+                app: AutoLearnAppIdentity(appID: appIdentifier, appName: appName),
                 commandPosted: pasteResult.didPostPasteCommand
             )
         } else {

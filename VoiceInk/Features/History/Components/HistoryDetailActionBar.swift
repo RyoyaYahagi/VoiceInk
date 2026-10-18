@@ -47,6 +47,7 @@ struct HistoryDetailActionBar: View {
             promptButton
             retryButton
             finderButton
+            dictionaryAddButton
             infoButton
             Spacer(minLength: 8)
             textActionButton
@@ -151,6 +152,19 @@ struct HistoryDetailActionBar: View {
             )
         }
         .disabled(audioURL == nil)
+    }
+
+    private var dictionaryAddButton: some View {
+        HistoryIconButton(
+            systemName: "text.badge.plus",
+            help: "テキストを参照しながら辞書に修正を登録"
+        ) {
+            DictionaryQuickAddManager.shared.show(
+                modelContainer: modelContext.container,
+                initialMode: .replacement,
+                referenceText: transcription.preferredHistoryText
+            )
+        }
     }
 
     private var infoButton: some View {

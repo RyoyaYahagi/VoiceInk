@@ -24,7 +24,7 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
     private let textReader = AutoLearnAXTextReader()
     private var session: Session?
 
-    func capturePastedText(text: String, processID: pid_t) async -> AutoLearnPasteToken? {
+    func capturePastedText(text: String, processID: pid_t) async -> AutoLearnCaptureOutcome {
         await perform { [self] in
             session = nil
             logger.notice(
@@ -85,7 +85,7 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
             logger.notice(
                 "Auto Learn observation armed fieldChars=\(fieldText.utf16.count, privacy: .public) pastedChars=\(observedPastedText.count, privacy: .public)"
             )
-            return token
+            return .armed(token)
         }
     }
 
@@ -99,11 +99,11 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
         }
     }
 
-    func finishSnapshot(token: AutoLearnPasteToken) async -> AutoLearnFieldSnapshot? {
+    func finishSnapshot(token: AutoLearnPasteToken) async -> AutoLearnSnapshotOutcome {
         await perform { [self] in
             guard let active = session, active.token == token else {
                 logger.notice("Auto Learn snapshot skipped: no active session")
-                return nil
+                return .skipped("snapshot-no-session")
             }
             session = nil
 
@@ -116,25 +116,27 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
                 finalFieldText = lastReadableText
             } else {
                 logger.notice("Auto Learn snapshot skipped: target text unreadable")
-                return nil
+                return .skipped("target-text-unreadable")
             }
             guard finalFieldText.utf16.count <= AutoLearnLimits.maximumFieldUTF16Length else {
                 logger.notice("Auto Learn snapshot skipped: field too large")
-                return nil
+                return .skipped("field-too-large")
             }
             guard !textIsExactlyEqual(finalFieldText, active.baselineFieldText) else {
                 logger.notice("Auto Learn snapshot skipped: field text unchanged")
-                return nil
+                return .skipped("field-text-unchanged")
             }
             logger.notice(
                 "Auto Learn snapshot captured baselineChars=\(active.baselineFieldText.utf16.count, privacy: .public) finalChars=\(finalFieldText.utf16.count, privacy: .public)"
             )
 
-            return AutoLearnFieldSnapshot(
-                baselineFieldText: active.baselineFieldText,
-                finalFieldText: finalFieldText,
-                pastedRange: active.pastedRange,
-                originalPastedText: active.pastedText
+            return .snapshot(
+                AutoLearnFieldSnapshot(
+                    baselineFieldText: active.baselineFieldText,
+                    finalFieldText: finalFieldText,
+                    pastedRange: active.pastedRange,
+                    originalPastedText: active.pastedText
+                )
             )
         }
     }
@@ -166,11 +168,11 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
         lhs.utf16.elementsEqual(rhs.utf16)
     }
 
-    private func rejectCapture(_ reason: String) -> AutoLearnPasteToken? {
+    private func rejectCapture(_ reason: String) -> AutoLearnCaptureOutcome {
         logger.notice(
             "Auto Learn capture rejected reason=\(reason, privacy: .public)"
         )
-        return nil
+        return .rejected(reason)
     }
 
     private func focusedElementMatches(_ targetElement: AXUIElement, in appElement: AXUIElement) -> Bool {

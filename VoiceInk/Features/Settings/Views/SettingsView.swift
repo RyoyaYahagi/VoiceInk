@@ -38,6 +38,7 @@ struct SettingsView: View {
             DictionaryAutomaticBackupSettings()
             Section {
                 ProviderUsageView()
+                EstimatedCostView()
             }
             Section {
                 LabeledContent("Primary Shortcut") {

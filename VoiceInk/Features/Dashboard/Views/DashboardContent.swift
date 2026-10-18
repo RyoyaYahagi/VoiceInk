@@ -239,6 +239,8 @@ struct DashboardContent: View {
 
             ProviderUsageView()
 
+            EstimatedCostView()
+
             nameEditorDismissArea {
                 heroSection
             }

@@ -12,7 +12,7 @@ enum SessionMetricRecorder {
         model: (any TranscriptionModel)?,
         in modelContext: ModelContext,
         timestamp: Date = Date()
-    ) throws -> Bool {
+    ) async throws -> Bool {
         guard transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue else {
             return false
         }
@@ -55,6 +55,11 @@ enum SessionMetricRecorder {
         )
 
         modelContext.insert(metric)
+        if let enhancementTokenEstimate, enhancementTokenEstimate.tokenCount > 0 {
+            await MainActor.run {
+                EnhancementUsageStore.shared.record(from: transcription, timestamp: timestamp)
+            }
+        }
         logger.notice("Recorded session metric for transcription \(transcriptionId.uuidString, privacy: .public)")
         return true
     }

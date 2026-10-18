@@ -19,12 +19,22 @@ final class DictionaryQuickAddManager {
         isVisible ? hide() : show(modelContainer: modelContainer)
     }
 
-    func show(modelContainer: ModelContainer, initialMode: DictionaryQuickAddView.Mode = .vocabulary) {
+    func show(
+        modelContainer: ModelContainer,
+        initialMode: DictionaryQuickAddView.Mode = .vocabulary,
+        referenceText: String? = nil
+    ) {
         guard !isVisible else { return }
 
         previousApp = NSWorkspace.shared.frontmostApplication
 
-        let initialSize = NSSize(width: 500, height: initialMode.panelHeight)
+        let initialSize = NSSize(
+            width: 500,
+            height: DictionaryQuickAddView.panelHeight(
+                mode: initialMode,
+                referenceText: referenceText
+            )
+        )
         let newPanel = PersistentQuickPanel(
             size: initialSize,
             positionDefaultsKey: "VoiceInkDictionaryQuickAddOrigin",
@@ -39,6 +49,7 @@ final class DictionaryQuickAddManager {
 
         let view = DictionaryQuickAddView(
             initialMode: initialMode,
+            referenceText: referenceText,
             onDismiss: { [weak self] in self?.hide() },
             onResize: { [weak self] height in
                 self?.panel?.resizeKeepingTopEdge(to: NSSize(width: 500, height: height))
@@ -95,6 +106,23 @@ struct DictionaryQuickAddView: View {
         }
     }
 
+    let referenceText: String?
+
+    /// The transcribed text shown as a copyable reference, trimmed.
+    var trimmedReferenceText: String? {
+        guard let referenceText else { return nil }
+        let trimmed = referenceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func panelHeight(mode: Mode, referenceText: String?) -> CGFloat {
+        var height = mode.panelHeight
+        if mode == .replacement, referenceText != nil {
+            height += 76
+        }
+        return height
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Query private var vocabularyWords: [VocabularyWord]
     @Query private var wordReplacements: [WordReplacement]
@@ -111,8 +139,14 @@ struct DictionaryQuickAddView: View {
     let onDismiss: () -> Void
     let onResize: (CGFloat) -> Void
 
-    init(initialMode: Mode = .vocabulary, onDismiss: @escaping () -> Void, onResize: @escaping (CGFloat) -> Void) {
+    init(
+        initialMode: Mode = .vocabulary,
+        referenceText: String? = nil,
+        onDismiss: @escaping () -> Void,
+        onResize: @escaping (CGFloat) -> Void
+    ) {
         _mode = State(initialValue: initialMode)
+        self.referenceText = referenceText
         self.onDismiss = onDismiss
         self.onResize = onResize
     }
@@ -158,10 +192,10 @@ struct DictionaryQuickAddView: View {
             DispatchQueue.main.async {
                 focusedField = newMode == .vocabulary ? .word : .original
             }
-            onResize(newMode.panelHeight)
+            onResize(Self.panelHeight(mode: newMode, referenceText: referenceText))
         }
         .onChange(of: errorMessage) { _, newError in
-            let height = mode.panelHeight + (newError != nil ? 24 : 0)
+            let height = Self.panelHeight(mode: mode, referenceText: referenceText) + (newError != nil ? 24 : 0)
             onResize(height)
         }
     }
@@ -208,8 +242,38 @@ struct DictionaryQuickAddView: View {
         if mode == .vocabulary {
             vocabularyInput
         } else {
-            replacementInputView
+            VStack(spacing: 6) {
+                if let reference = trimmedReferenceText {
+                    referenceBox(reference)
+                }
+                replacementInputView
+            }
         }
+    }
+
+    /// 読み取り失敗時の代替として貼った文字起こしテキストを参照できるようにする。
+    private func referenceBox(_ reference: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("文字起こしテキスト(参考)")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(reference)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.Text.primary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(AppTheme.Surface.control)
+        )
+        .padding(.horizontal, 14)
     }
 
     private var vocabularyInput: some View {
