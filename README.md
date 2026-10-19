@@ -125,12 +125,13 @@ voiceink-rebuild           # ビルドしない場合は --skip-build
 ### ローカルビルドの制約
 
 - ライセンス判定は常に「購入済み」になる（`#if LOCAL_BUILD` のブロックによる）。
-- iCloud 辞書同期と自動更新は無効。更新は `git pull` して再ビルドする。
-- API キーの保存先が配布版と別のキーチェーン名前空間
-  （`com.prakashjoshipax.VoiceInk.Local`）なので、配布版で入れたキーは引き継がれない。
-- bundle id は配布版と同じなので、履歴・辞書・設定はどちらでも共有される。
-  `~/Library/Application Support/com.prakashjoshipax.VoiceInk/` と
-  `~/Library/Preferences/com.prakashjoshipax.VoiceInk.plist` は消さないこと。
+- 自動更新は無効。更新は新しいリリースを入れ直すか、`git pull` して再ビルドする。
+- 辞書は iCloud コンテナ `iCloud.com.ryoyayahagi.KoeInk` で Mac と iOS の間で同期する。
+- bundle id は `com.ryoyayahagi.VoiceInk` で配布版と別。データは
+  `~/Library/Application Support/com.ryoyayahagi.VoiceInk/` に保存され、配布版
+  （`com.prakashjoshipax.VoiceInk`）と共存する。消すと履歴・辞書・設定が失われる。
+- API キーの保存先もローカルビルド専用のキーチェーン名前空間になる。配布版で入れた
+  キーは引き継がれない。
 
 
 ## Requirements
