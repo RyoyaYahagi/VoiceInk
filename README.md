@@ -54,29 +54,24 @@ brew install --cask voiceink
 ### Build from Source
 As an open-source project, you can build VoiceInk yourself by following the instructions in [BUILDING.md](BUILDING.md). However, the compiled version includes additional benefits like automatic updates, priority support via Discord and email, and helps fund ongoing development.
 
-## このフォークのビルドをダウンロードする（日本語）
+## 個人配布用の DMG（日本語）
 
-自分用フォークのビルドは GitHub Releases に置いてある。ビルドしなくても、ダウンロードして
-`/Applications` に入れるだけで使える。
+このフォークのビルドは GitHub では配布しない。Developer ID で署名し、Apple の公証を通した
+DMG を個人的に配る。
 
-- 最新版（常にこの URL）: https://github.com/RyoyaYahagi/VoiceInk/releases/latest/download/VoiceInk.dmg
-- 過去のビルド一覧: https://github.com/RyoyaYahagi/VoiceInk/releases
+必要なもの:
 
-初回起動では Gatekeeper の確認が出るので、`VoiceInk.app` を右クリック →「開く」。
-それでも開かないときは `xattr -cr /Applications/VoiceInk.app`。Developer ID で公証して
-いないため、この確認は避けられない。加えて、いまのリリースは Apple Development 署名なので、
-署名に含まれる端末以外の Mac では起動できないことがある。Developer ID 証明書を Xcode で
-作成すれば、`scripts/publish-dmg.sh` のまま公証済みの DMG を配れる。
-
-DMG の作成と公開は次のコマンドで行う（`make local` を含むので約 8 分）:
+- Developer ID Application 証明書
+  （Xcode → Settings → Accounts → チームを選ぶ → Manage Certificates → 「+」）
+- App Store Connect API キー（`~/.appstoreconnect/private_keys/AuthKey_*.p8`）
 
 ```shell
-make publish-dmg                          # ビルド → DMG → gh release create
-./scripts/publish-dmg.sh --skip-build     # ビルド済みの ~/Downloads/VoiceInk.app を使う
+make personal-dmg
 ```
 
-アップロードされるもの: `VoiceInk.dmg`（固定名）, `VoiceInk-<version>-<build>.dmg`,
-`SHA256SUMS`。
+`scripts/build-personal-dmg.sh` が archive → Developer ID で書き出し → DMG 作成 → 公証 →
+staple まで行う。出力は `~/Downloads/VoiceInk-dmg/VoiceInk.dmg`。証明書がない場合は作成手順を
+表示して止まる。公証を飛ばして署名と DMG だけ作る場合は `--skip-notarization`。
 
 ## このフォークを使う場合のビルドと起動（日本語）
 
