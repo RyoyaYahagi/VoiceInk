@@ -7,7 +7,7 @@ LOCAL_CODESIGN_IDENTITY ?= Apple Development
 APP_OUTPUT_DIR ?= $(HOME)/Downloads
 RUN_APP_NAME ?= VoiceInk
 
-.PHONY: all clean whisper setup build local check healthcheck help dev run release release-setup
+.PHONY: all clean whisper setup build local check healthcheck help dev run release release-setup dmg publish-dmg package-dmg
 
 # Default target
 all: check build
@@ -85,6 +85,17 @@ local: check setup
 		echo "Error: Could not find built VoiceInk.app at $$APP_PATH"; \
 		exit 1; \
 	fi
+
+# Package the existing ~/Downloads/VoiceInk.app into a DMG (no build).
+package-dmg:
+	@./scripts/package-dmg.sh "$(APP_OUTPUT_DIR)/VoiceInk.app"
+
+# Build, package, and publish the DMG to GitHub Releases.
+dmg: local
+	@./scripts/package-dmg.sh "$(APP_OUTPUT_DIR)/VoiceInk.app"
+
+publish-dmg:
+	@./scripts/publish-dmg.sh
 
 # Run application
 run:
