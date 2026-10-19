@@ -96,6 +96,7 @@ struct VoiceInkApp: App {
 
         container = resolvedContainer
         DictionaryService.cleanUpDictionaryContent(context: resolvedContainer.mainContext, source: "launch")
+        DictionarySyncMaintenance.shared.start(container: resolvedContainer)
         DictionaryAutomaticBackup.shared.start(context: resolvedContainer.mainContext)
 
         // Initialize services with proper sharing of instances
@@ -120,8 +121,7 @@ struct VoiceInkApp: App {
         }
 
         // 1. Create modelsDirectory URL
-        let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.prakashjoshipax.VoiceInk")
+        let appSupportDirectory = AppPaths.appSupportDirectory
         let modelsDirectory = appSupportDirectory.appendingPathComponent("WhisperModels")
 
         // 2. Create model managers
@@ -259,7 +259,7 @@ struct VoiceInkApp: App {
 
     private static func createPersistentContainer(schema: Schema, logger: Logger) throws -> ModelContainer {
         let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.prakashjoshipax.VoiceInk", isDirectory: true)
+            .appendingPathComponent(AppPaths.appSupportFolderName, isDirectory: true)
 
         try? FileManager.default.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
 
@@ -284,7 +284,7 @@ struct VoiceInkApp: App {
                 "iCloud.com.ryoyayahagi.KoeInk")
         #else
             let dictionaryCloudKit: ModelConfiguration.CloudKitDatabase = .private(
-                "iCloud.com.prakashjoshipax.VoiceInk")
+                "iCloud.com.ryoyayahagi.KoeInk")
         #endif
         let dictionaryConfig = ModelConfiguration(
             "dictionary",
@@ -431,10 +431,6 @@ struct VoiceInkApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
-
-            CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updaterViewModel: updaterViewModel)
-            }
         }
 
         MenuBarExtra(isInserted: $showMenuBarIcon) {
