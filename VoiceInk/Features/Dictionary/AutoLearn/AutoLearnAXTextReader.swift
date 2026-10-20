@@ -110,6 +110,53 @@ final class AutoLearnAXTextReader {
         return AutoLearnAXTextValue(text: value, source: "value")
     }
 
+    // Temporary, opt-in diagnostics. Never include field text, titles, URLs,
+    // content hashes, or text-marker payloads in this description.
+    func diagnosticSummary(target: AXUIElement, appElement: AXUIElement) -> String {
+        var rawValue: CFTypeRef?
+        let valueError = AXUIElementCopyAttributeValue(target, kAXValueAttribute as CFString, &rawValue)
+        let valueText = (rawValue as? String) ?? (rawValue as? NSAttributedString)?.string
+        var rawCount: CFTypeRef?
+        let countError = AXUIElementCopyAttributeValue(target, kAXNumberOfCharactersAttribute as CFString, &rawCount)
+        let count = (rawCount as? NSNumber)?.intValue
+        var rangeError: AXError = .noValue
+        var rangeText: String?
+        if let count, count >= 0, count <= AutoLearnLimits.maximumFieldUTF16Length {
+            var range = CFRange(location: 0, length: count)
+            if let parameter = AXValueCreate(.cfRange, &range) {
+                var rawRangeText: CFTypeRef?
+                rangeError = AXUIElementCopyParameterizedAttributeValue(
+                    target, kAXStringForRangeParameterizedAttribute as CFString, parameter, &rawRangeText
+                )
+                rangeText = (rawRangeText as? String) ?? (rawRangeText as? NSAttributedString)?.string
+            }
+        }
+        let markerText = markerSnapshot(from: target)?.text
+        let selection = copyRange(kAXSelectedTextRangeAttribute as CFString, from: target)
+        var rawFocus: CFTypeRef?
+        let focusError = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &rawFocus)
+        var focusSummary = "focusError=\(focusError.rawValue)"
+        if let rawFocus, CFGetTypeID(rawFocus) == AXUIElementGetTypeID() {
+            let focused = unsafeBitCast(rawFocus, to: AXUIElement.self)
+            let same = CFEqual(focused, target)
+            focusSummary += " focusElement=\(CFHash(focused)) sameTarget=\(same)"
+            // Do not inspect another process or a non-editable control.
+            if !same, owningProcessID(of: focused) == owningProcessID(of: target), isEditable(focused) {
+                let current = textValue(from: focused)
+                focusSummary += " focusSource=\(current?.source ?? "unreadable") focusText=\(diagnosticTextShape(current?.text))"
+            }
+        }
+        return "targetElement=\(CFHash(target)) valueError=\(valueError.rawValue) value=\(diagnosticTextShape(valueText))"
+            + " countError=\(countError.rawValue) reportedChars=\(count ?? -1)"
+            + " rangeError=\(rangeError.rawValue) range=\(diagnosticTextShape(rangeText)) markers=\(diagnosticTextShape(markerText))"
+            + " selectionStart=\(selection?.location ?? -1) selectionLength=\(selection?.length ?? -1) " + focusSummary
+    }
+
+    private func diagnosticTextShape(_ text: String?) -> String {
+        guard let text else { return "unreadable" }
+        return "chars:\(text.utf16.count),blank:\(AutoLearnTextNormalizer.accessibilityComparable(text).isEmpty)"
+    }
+
     private func makeReadings(
         from element: AXUIElement,
         appElement: AXUIElement,

@@ -14,6 +14,7 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
         /// Web 系アプリでは確定時までに要素が作り直されて読めなくなることがあるため、
         /// 読めた時点の値を残しておき、確定時の代わりに使う。
         var lastReadableText: String?
+        var diagnosticSample = 0
     }
 
     private let queue = DispatchQueue(label: "com.prakashjoshipax.voiceink.auto-learn.accessibility")
@@ -23,6 +24,14 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
     )
     private let textReader = AutoLearnAXTextReader()
     private var session: Session?
+    // Temporary opt-in probe; remove after the Chromium capture investigation.
+    private let diagnosticsEnabled = UserDefaults.standard.bool(forKey: "VoiceInkAutoLearnAXDiagnostics")
+
+    init() {
+        if diagnosticsEnabled {
+            logger.notice("[DEBUG-autolearn-ax] diagnostics enabled; text content is not logged")
+        }
+    }
 
     func capturePastedText(text: String, processID: pid_t) async -> AutoLearnCaptureOutcome {
         await perform { [self] in
@@ -85,6 +94,12 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
             logger.notice(
                 "Auto Learn observation armed fieldChars=\(fieldText.utf16.count, privacy: .public) pastedChars=\(observedPastedText.count, privacy: .public)"
             )
+            if diagnosticsEnabled, let active = session {
+                logDiagnostic(
+                    phase: "capture", active: active,
+                    value: AutoLearnAXTextValue(text: fieldText, source: reading.source)
+                )
+            }
             return .armed(token)
         }
     }
@@ -93,8 +108,12 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
     func refreshSnapshot(token: AutoLearnPasteToken) async {
         await perform { [self] in
             guard var active = session, active.token == token else { return }
-            guard let value = textReader.textValue(from: active.targetElement) else { return }
-            active.lastReadableText = value.text
+            let value = textReader.textValue(from: active.targetElement)
+            if diagnosticsEnabled {
+                active.diagnosticSample += 1
+                logDiagnostic(phase: "sample", active: active, value: value)
+            }
+            if let value { active.lastReadableText = value.text }
             session = active
         }
     }
@@ -108,8 +127,12 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
             session = nil
 
             defer { textReader.restoreWebAccessibility(processID: AXProcessID(active.appElement), appElement: active.appElement) }
+            let finalTextValue = textReader.textValue(from: active.targetElement)
+            if diagnosticsEnabled {
+                logDiagnostic(phase: "finish", active: active, value: finalTextValue)
+            }
             let finalFieldText: String
-            if let finalTextValue = textReader.textValue(from: active.targetElement) {
+            if let finalTextValue {
                 finalFieldText = finalTextValue.text
             } else if let lastReadableText = active.lastReadableText {
                 logger.notice("Auto Learn snapshot recovered from the last readable value")
@@ -156,6 +179,28 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
             }
             session = nil
         }
+    }
+
+    private func logDiagnostic(phase: String, active: Session, value: AutoLearnAXTextValue?) {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        // Limit extra AX requests on stable samples so the probe does not
+        // materially change the normal one-second sampling cadence.
+        let changed = value.map { !textIsExactlyEqual($0.text, active.lastReadableText ?? "") } ?? false
+        let inspect = phase != "sample" || active.diagnosticSample == 1 || active.diagnosticSample % 5 == 0 || changed
+        let details = inspect
+            ? textReader.diagnosticSummary(target: active.targetElement, appElement: active.appElement)
+            : "details=throttled"
+        let probeMilliseconds = (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+        let processID = AXProcessID(active.appElement)
+        let token = active.token.id.uuidString
+        let source = value?.source ?? "unreadable"
+        let chars = value?.text.utf16.count ?? -1
+        let blank = value.map { AutoLearnTextNormalizer.accessibilityComparable($0.text).isEmpty } ?? false
+        let matchesBaseline = value.map { textIsExactlyEqual($0.text, active.baselineFieldText) } ?? false
+        let cachedChars = active.lastReadableText?.utf16.count ?? -1
+        logger.notice(
+            "[DEBUG-autolearn-ax] phase=\(phase, privacy: .public) token=\(token, privacy: .public) sample=\(active.diagnosticSample, privacy: .public) pid=\(processID, privacy: .public) probeMs=\(probeMilliseconds, privacy: .public) source=\(source, privacy: .public) chars=\(chars, privacy: .public) blank=\(blank, privacy: .public) matchesBaseline=\(matchesBaseline, privacy: .public) cachedChars=\(cachedChars, privacy: .public) \(details, privacy: .public)"
+        )
     }
 
     private func AXProcessID(_ element: AXUIElement) -> pid_t {
