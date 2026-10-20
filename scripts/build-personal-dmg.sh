@@ -113,11 +113,40 @@ DMG=$(VOICEINK_DMG_SIGN_IDENTITY="$IDENTITY" "$SCRIPT_DIR/package-dmg.sh" "$APP"
 
 if [[ "$SKIP_NOTARIZATION" -eq 0 ]]; then
     echo "Submitting for notarization..."
-    xcrun notarytool submit "$DMG" \
+    SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG" \
         --key "$NOTARY_KEY" \
         --key-id "$NOTARY_KEY_ID" \
-        --issuer "$NOTARY_ISSUER" \
-        --wait
+        --issuer "$NOTARY_ISSUER" 2>&1)
+    echo "$SUBMIT_OUTPUT"
+    SUBMISSION_ID=$(printf '%s\n' "$SUBMIT_OUTPUT" | awk '/^[[:space:]]*id: /{print $2; exit}')
+    if [[ -z "$SUBMISSION_ID" ]]; then
+        echo "error: could not read the notarization submission id" >&2
+        exit 1
+    fi
+
+    # --wait can time out on a slow connection even though Apple keeps processing,
+    # so poll the submission instead of failing the whole build.
+    while true; do
+        INFO=$(xcrun notarytool info "$SUBMISSION_ID" \
+            --key "$NOTARY_KEY" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER" 2>&1)
+        STATUS=$(printf '%s\n' "$INFO" | awk '/status: /{print $2; exit}')
+        echo "notarization status: ${STATUS:-unknown} ($SUBMISSION_ID)"
+        case "$STATUS" in
+            Accepted) break ;;
+            Invalid|Rejected)
+                echo "$INFO" >&2
+                xcrun notarytool log "$SUBMISSION_ID" \
+                    --key "$NOTARY_KEY" \
+                    --key-id "$NOTARY_KEY_ID" \
+                    --issuer "$NOTARY_ISSUER" >&2 || true
+                exit 1
+                ;;
+        esac
+        sleep 20
+    done
+
     xcrun stapler staple "$DMG"
     xcrun stapler validate "$DMG"
     spctl -a -t open --context context:primary-signature -v "$DMG"
