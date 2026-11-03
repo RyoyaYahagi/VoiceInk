@@ -27,6 +27,8 @@ actor AutoLearnService {
     private var focusFinalizationTask: Task<Void, Never>?
     /// 見張り中に入力欄のテキストを定期的に控え直すタスク。
     private var samplingTask: Task<Void, Never>?
+    private var valueSampleInFlight = false
+    private var valueSampleRequested = false
     private var reviewTask: Task<Void, Never>?
     private var reviewGeneration: UInt64 = 0
     private var claimedCandidateIDs = Set<UUID>()
@@ -294,6 +296,46 @@ actor AutoLearnService {
         }
     }
 
+    /// 入力欄の値が変わったら読み直す。打鍵ごとに通知が来るため、
+    /// 読み取り中に届いた通知は 1 回分の読み直しにまとめる。
+    func valueMayHaveChanged(token: AutoLearnPasteToken) async {
+        guard AutoLearnSettings.isEnabled, activeToken == token else { return }
+        guard !valueSampleInFlight else {
+            valueSampleRequested = true
+            return
+        }
+        valueSampleInFlight = true
+        defer { valueSampleInFlight = false }
+        repeat {
+            valueSampleRequested = false
+            guard await sampleSnapshotIfActive(token: token) else { return }
+        } while valueSampleRequested
+    }
+
+    /// Web 系エディタ（Chromium / Electron）は貼り付けの反映や
+    /// アクセシビリティツリーの構築が遅れることがあり、初回の読み取りで
+    /// 貼り付けた文字列が見つからない場合がある。その場合だけ少し待って読み直す。
+    /// 途中で次の貼り付けなどが始まったら nil を返す。
+    private func capturePastedTextWithRetry(
+        text: String,
+        processID: pid_t,
+        generation: UInt64
+    ) async -> AutoLearnCaptureOutcome? {
+        let retryableReasons: Set<String> = ["pasted-range-invalid", "focused-text-reading-unavailable"]
+        var outcome = await accessibilityRuntime.capturePastedText(text: text, processID: processID)
+        for delay in AutoLearnLimits.captureRetryDelaysNanoseconds {
+            guard case .rejected(let reason) = outcome, retryableReasons.contains(reason) else { break }
+            guard await sleep(nanoseconds: delay),
+                !Task.isCancelled,
+                lifecycleGeneration == generation,
+                AutoLearnSettings.isEnabled
+            else { return nil }
+            logger.notice("Auto Learn capture retry after reason=\(reason, privacy: .public)")
+            outcome = await accessibilityRuntime.capturePastedText(text: text, processID: processID)
+        }
+        return outcome
+    }
+
     private func beginObservation(
         text: String,
         processID: pid_t,
@@ -307,10 +349,9 @@ actor AutoLearnService {
         else { return }
 
         let token: AutoLearnPasteToken
-        switch await accessibilityRuntime.capturePastedText(
-            text: text,
-            processID: processID
-        ) {
+        switch await capturePastedTextWithRetry(text: text, processID: processID, generation: generation) {
+        case nil:
+            return
         case .rejected(let reason):
             await MainActor.run {
                 AutoLearnStatsStore.shared.recordCaptureFailure(reason: reason, app: app)
@@ -347,11 +388,20 @@ actor AutoLearnService {
         activeGeneration = generation
         activeProcessID = processID
         activeApp = app
-        focusObserver.start(processID: processID, token: token) { token in
-            Task {
-                await AutoLearnService.shared.focusMayHaveChanged(token: token)
+        focusObserver.start(
+            processID: processID,
+            token: token,
+            handler: { token in
+                Task {
+                    await AutoLearnService.shared.focusMayHaveChanged(token: token)
+                }
+            },
+            valueHandler: { token in
+                Task {
+                    await AutoLearnService.shared.valueMayHaveChanged(token: token)
+                }
             }
-        }
+        )
         scheduleDeadline(
             token: token,
             after: AutoLearnLimits.observationDurationNanoseconds

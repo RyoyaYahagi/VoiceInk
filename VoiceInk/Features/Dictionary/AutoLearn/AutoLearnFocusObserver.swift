@@ -4,21 +4,31 @@ import Foundation
 private final class AutoLearnFocusCallbackBridge: @unchecked Sendable {
     let token: AutoLearnPasteToken
     let handler: @Sendable (AutoLearnPasteToken) -> Void
+    let valueHandler: @Sendable (AutoLearnPasteToken) -> Void
 
-    init(token: AutoLearnPasteToken, handler: @escaping @Sendable (AutoLearnPasteToken) -> Void) {
+    init(
+        token: AutoLearnPasteToken,
+        handler: @escaping @Sendable (AutoLearnPasteToken) -> Void,
+        valueHandler: @escaping @Sendable (AutoLearnPasteToken) -> Void
+    ) {
         self.token = token
         self.handler = handler
+        self.valueHandler = valueHandler
     }
 
-    func notify() {
-        handler(token)
+    func notify(_ notification: CFString) {
+        if CFEqual(notification, kAXValueChangedNotification as CFString) {
+            valueHandler(token)
+        } else {
+            handler(token)
+        }
     }
 }
 
-private let autoLearnFocusCallback: AXObserverCallback = { _, _, _, refcon in
+private let autoLearnFocusCallback: AXObserverCallback = { _, _, notification, refcon in
     guard let refcon else { return }
     let bridge = Unmanaged<AutoLearnFocusCallbackBridge>.fromOpaque(refcon).takeUnretainedValue()
-    bridge.notify()
+    bridge.notify(notification)
 }
 
 final class AutoLearnFocusObserver: @unchecked Sendable {
@@ -34,7 +44,8 @@ final class AutoLearnFocusObserver: @unchecked Sendable {
     func start(
         processID: pid_t,
         token: AutoLearnPasteToken,
-        handler: @escaping @Sendable (AutoLearnPasteToken) -> Void
+        handler: @escaping @Sendable (AutoLearnPasteToken) -> Void,
+        valueHandler: @escaping @Sendable (AutoLearnPasteToken) -> Void
     ) {
         stop()
 
@@ -50,7 +61,8 @@ final class AutoLearnFocusObserver: @unchecked Sendable {
                 processID: processID,
                 token: token,
                 generation: generation,
-                handler: handler
+                handler: handler,
+                valueHandler: valueHandler
             )
         }
         thread.name = "VoiceInk Auto Learn Focus Observer"
@@ -81,7 +93,8 @@ final class AutoLearnFocusObserver: @unchecked Sendable {
         processID: pid_t,
         token: AutoLearnPasteToken,
         generation: UUID,
-        handler: @escaping @Sendable (AutoLearnPasteToken) -> Void
+        handler: @escaping @Sendable (AutoLearnPasteToken) -> Void,
+        valueHandler: @escaping @Sendable (AutoLearnPasteToken) -> Void
     ) {
         autoreleasepool {
             let appElement = AXUIElementCreateApplication(processID)
@@ -95,12 +108,16 @@ final class AutoLearnFocusObserver: @unchecked Sendable {
                 return
             }
 
-            let bridge = AutoLearnFocusCallbackBridge(token: token, handler: handler)
+            let bridge = AutoLearnFocusCallbackBridge(
+                token: token, handler: handler, valueHandler: valueHandler
+            )
             let refcon = Unmanaged.passRetained(bridge).toOpaque()
             let requestedNotifications = [
                 kAXFocusedUIElementChangedNotification as String,
                 kAXFocusedWindowChangedNotification as String,
                 kAXApplicationDeactivatedNotification as String,
+                // 送信で欄が空になる直前の修正を取りこぼさないよう、値の変化でも読み直す。
+                kAXValueChangedNotification as String,
             ]
             var registeredNotifications: [String] = []
 
