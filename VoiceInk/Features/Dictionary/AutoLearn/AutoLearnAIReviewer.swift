@@ -477,6 +477,8 @@ final class AutoLearnAIReviewer: @unchecked Sendable {
 
         Misrecognized public names: the user's speech-to-text model may be language-specific, such as a Japanese-only model, and may fail to output public names in their standard spelling. When the original is a misrecognized rendering of such a name—a katakana or other transliteration, a split or merged rendering, or a phonetically similar wrong word—and the correction restores its standard spelling, return addReplacementOnly. Both gates still apply. incorrectTextToReplace must be the complete misrecognized name, never a fragment that is also an ordinary word on its own, such as コード alone for Code. Reject case-only changes and changes between two standard spellings of the same name.
 
+        AI model names and codenames count as product names, including short or unfamiliar names. When the context identifies an AI model or AI system, a complete kana rendering changed to its phonetically matching Latin-script identifier qualifies for addReplacementOnly even if you do not recognize that identifier. This is speech-model spelling recovery, not a change between two standard spellings. Do not extend this rule to ordinary role labels such as worker, reviewer, or orchestrator, or to fragments of a longer name. Both gates still apply.
+
         Reject case-only changes and partial unsafe mappings.
 
         Batch canonicalization: when corrected terms are clearly spelling or pronunciation variants of one entity, use one corrected form already present in correctedText for all related acceptances. Prefer the most frequent, then most complete plausible form. Never invent a form or merge by meaning alone.
