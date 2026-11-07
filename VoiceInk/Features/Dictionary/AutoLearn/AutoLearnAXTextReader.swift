@@ -1,4 +1,5 @@
 import ApplicationServices
+import Darwin
 import Foundation
 
 struct AutoLearnAXTextReading {
@@ -31,6 +32,16 @@ final class AutoLearnAXTextReader {
     private static let endMarkerForRangeAttribute = "AXEndTextMarkerForTextMarkerRange" as CFString
     private static let rangeForMarkersAttribute = "AXTextMarkerRangeForUnorderedTextMarkers" as CFString
     private static let stringForMarkerRangeAttribute = "AXStringForTextMarkerRange" as CFString
+    private typealias CopyStartMarker = @convention(c) (CFTypeRef) -> Unmanaged<CFTypeRef>?
+    // WebKit does not implement Chromium's AXStartTextMarkerForTextMarkerRange.
+    // Resolve the system marker helper optionally, so unsupported OS versions
+    // simply retain the existing capture failure behavior.
+    private static let copyStartMarker: CopyStartMarker? = {
+        guard let handle = dlopen(nil, RTLD_LAZY) else { return nil }
+        defer { dlclose(handle) }
+        guard let symbol = dlsym(handle, "AXTextMarkerRangeCopyStartMarker") else { return nil }
+        return unsafeBitCast(symbol, to: CopyStartMarker.self)
+    }()
 
     private var manualAccessibilityLastEnabledAt: [pid_t: UInt64] = [:]
     private var manualAccessibilityUnsupportedUntil: [pid_t: UInt64] = [:]
@@ -67,8 +78,47 @@ final class AutoLearnAXTextReader {
             )
             readings.append(contentsOf: candidateReadings)
         }
+        if readings.isEmpty {
+            let resolver = AutoLearnWebFocusResolver<AXUIElement>(
+                isWebArea: { self.copyString(kAXRoleAttribute as CFString, from: $0) == "AXWebArea" },
+                children: { self.copyOpaque(kAXChildrenAttribute as CFString, from: $0) as? [AXUIElement] ?? [] },
+                selectedEditableElement: { self.selectedEditableElement(in: $0, processID: processID) }
+            )
+            var roots = candidates.map(\.element)
+            if let window = copyElement(kAXFocusedWindowAttribute as CFString, from: appElement) {
+                roots.append(window)
+            }
+            for root in roots {
+                guard let editable = resolver.resolve(in: root) else { continue }
+                readings = makeReadings(from: editable, appElement: appElement, focusSource: "web-selection")
+                if !readings.isEmpty { break }
+            }
+        }
         if readings.isEmpty { restoreWebAccessibility(processID: processID, appElement: appElement) }
         return readings
+    }
+
+    private func selectedEditableElement(in webArea: AXUIElement, processID: pid_t) -> AXUIElement? {
+        guard let selectedRange = copyOpaque(Self.selectedMarkerRangeAttribute, from: webArea),
+            let marker = copyOpaqueParameterized(
+                Self.startMarkerForRangeAttribute, parameter: selectedRange, from: webArea
+            ) ?? Self.copyStartMarker?(selectedRange)?.takeRetainedValue(),
+            let value = copyOpaqueParameterized(
+                "AXUIElementForTextMarker" as CFString, parameter: marker, from: webArea
+            ), CFGetTypeID(value) == AXUIElementGetTypeID()
+        else { return nil }
+
+        let selectedElement = unsafeBitCast(value, to: AXUIElement.self)
+        // Restrict capture to the selection's actual editor. A page selection in
+        // chat history or another read-only document must never become a target.
+        let editable = copyElement("AXEditableAncestor" as CFString, from: selectedElement)
+            ?? (isEditable(selectedElement) ? selectedElement : nil)
+        guard let editable,
+            owningProcessID(of: editable) == processID,
+            isEditable(editable),
+            copyBool(kAXFocusedAttribute as CFString, from: editable) == true
+        else { return nil }
+        return editable
     }
 
     func restoreWebAccessibility(processID: pid_t, appElement: AXUIElement) {

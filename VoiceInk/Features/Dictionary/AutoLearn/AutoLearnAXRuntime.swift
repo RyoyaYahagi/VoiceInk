@@ -83,7 +83,7 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
                 lastReadableText: fieldText
             )
             logger.notice(
-                "Auto Learn observation armed fieldChars=\(fieldText.utf16.count, privacy: .public) pastedChars=\(observedPastedText.count, privacy: .public)"
+                "Auto Learn observation armed fieldChars=\(fieldText.utf16.count, privacy: .public) pastedChars=\(observedPastedText.count, privacy: .public) focusSource=\(reading.focusSource, privacy: .public) textSource=\(reading.source, privacy: .public)"
             )
             return .armed(token)
         }
