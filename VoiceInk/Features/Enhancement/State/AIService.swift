@@ -786,7 +786,7 @@ class AIService: ObservableObject {
             messages: [.user(payload)],
             systemPrompt: systemPrompt,
             localUserPrompt: payload,
-            timeout: EnhancementRequestSettings.timeout
+            timeout: max(EnhancementRequestSettings.timeout, AutoLearnLimits.reviewTimeoutSeconds)
         ).text
     }
 
