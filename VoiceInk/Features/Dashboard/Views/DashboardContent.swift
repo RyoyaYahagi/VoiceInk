@@ -113,7 +113,6 @@ struct DashboardContent: View {
         }
         .onAppear {
             refreshAccessibilityStatus()
-            updaterViewModel.checkForUpdatesIfDue()
             if shouldAutomaticallyPresentAutoLearnFailure {
                 scheduleAutoLearnFailurePresentation()
             }
@@ -672,29 +671,6 @@ struct DashboardContent: View {
                 .fixedSize(horizontal: true, vertical: true)
                 .disabled(starPrompt.isStarring || starPrompt.completionState != .none)
                 .animation(.easeInOut(duration: 0.15), value: starPrompt.openFailed)
-            }
-
-            if let availableUpdate = updaterViewModel.availableUpdate {
-                Button(action: updaterViewModel.checkForUpdates) {
-                    footerActionLabel(
-                        icon: "arrow.down.circle.fill",
-                        title: "Update Available",
-                        color: AppTheme.Status.infoStrong
-                    )
-                }
-                .buttonStyle(.plain)
-                .fixedSize(horizontal: true, vertical: true)
-                .disabled(!updaterViewModel.canCheckForUpdates)
-                .help(
-                    String(
-                        format: String(localized: "Open the VoiceInk %@ update"),
-                        availableUpdate.displayVersion
-                    )
-                )
-                .accessibilityLabel("Update Available")
-                .accessibilityValue(Text(verbatim: availableUpdate.displayVersion))
-                .accessibilityHint("Opens the update window")
-                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
             Button(action: copySystemInfo) {

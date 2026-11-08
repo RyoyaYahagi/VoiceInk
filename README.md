@@ -54,9 +54,87 @@ brew install --cask voiceink
 ### Build from Source
 As an open-source project, you can build VoiceInk yourself by following the instructions in [BUILDING.md](BUILDING.md). However, the compiled version includes additional benefits like automatic updates, priority support via Discord and email, and helps fund ongoing development.
 
+## フォーク独自の変更一覧（日本語）
+
+このリポジトリは `Beingpax/VoiceInk` を元にした `RyoyaYahagi/VoiceInk`。
+カスタマイズの統合先はこのフォークの `main`。上のダウンロード先・Homebrew・リリースバッジは
+フォーク元の配布版を指し、以下の変更を含むビルドの入手先ではない。
+
+以下はフォーク元との共通祖先以降に追加した変更の一覧。コミット番号は実装を確認するための参照。
+
+| 変更 | 動作・利用条件 | 実装コミット |
+| --- | --- | --- |
+| 日本語のフィラー除去 | 「えーと」「あのー」などを既定候補に追加し、空白のない日本語でも除去できるようにした。保存済みの独自リストは維持する。 | `7b34b4bb` |
+| ローカル音声検出 | Silero VAD で発話を検出する。リアルタイム送信では発話前後の余白を残し、無音だけの送信を抑制する。 | `ac5db988` |
+| 通信障害時の復旧 | クラウド文字起こしが失敗した場合、導入済みの Whisper モデルで Mac 内で再処理する。設定で無効化・モデル指定が可能。モデル未導入時は元のエラーを表示し、自動ダウンロードや別クラウドへの転送はしない。 | `466a2a85` |
+| 辞書の自動バックアップ | 既定で起動時と5分ごとに変更を確認し、JSONを保存して最新30世代を保持する。既定の保存先はアプリのデータフォルダ内の `DictionaryBackups`。設定で保存先を変更でき、復元は辞書設定の Import から行う。 | `187e3d1b` |
+| Web入力欄での自動学習 | Web入力欄の取得・貼り付け範囲の復元、送信後に空になる欄、WebKitの隠れた欄、日本語の差分抽出、製品名・短いAIモデル名の審査を改善した。詳細は次節。 | `1ed58056`, `5e51e1b0`, `0736c200`, `195fa9e8`, `c3178d64` |
+| 手動の修正登録 | 自動取得できない入力欄で手動登録を案内する。辞書設定から置換登録を開けるほか、履歴の元テキストを使って修正を登録できる。 | `98e2dd35`, `12984c9e` |
+| 自動学習の統計 | アプリ別の取得・候補生成などの状況と、AI審査の利用量を記録する。入力欄ごとの学習状況を確認するために使う。 | `12984c9e` |
+| 利用量と推定料金 | 文字起こしの処理先別に回数・録音時間・失敗・中止を月別（UTC）で記録する。AI補正と自動学習の審査も別に集計し、組み込み単価と文字数などから推定料金を表示する。実請求やサービス側の残枠とは一致しない。料金表示の文字色も調整した。 | `466a2a85`, `12984c9e`, `fc1dfdce` |
+| iCloud辞書同期 | ローカルビルドで `iCloud.com.ryoyayahagi.KoeInk` を使ってMacとiOSの辞書を同期する。CloudKitの取り込み完了後に重複エントリを整理する。対応する署名・権限・iCloudアカウントが必要。 | `5c8b1302`, `6e03f810` |
+| フォークのデータ分離 | bundle id・データ保存先・キーチェーンを配布版から分離し、フォーク元の自動更新を無効化した。詳細は後述のローカルビルドの制約を参照。 | `8a4f2b31`, `5c8b1302` |
+| ビルド・個人配布 | ローカルビルドと起動手順、DMG作成を追加した。GitHubリリース公開用の構成を経て、現在はDeveloper ID署名・Apple公証を行う個人配布用DMGを作る。公証は状態をポーリングして待つ。 | `9e3d6aef`, `b1a0903f`, `6ec2663b`, `3a1b3941` |
+| README整備 | データ保存先・iCloud・起動手順・Auto Learnの変更と利用条件を記載した。 | `805b6277`, `b3008b95` |
+
+音声認識の実行先、AI補正、自動学習の審査、iCloud同期はそれぞれ独立した設定・通信経路になる。
+上の「100% offline」はローカル処理を選んだ場合の説明であり、クラウド機能を使う場合には当てはまらない。
+
+## このフォークの Auto Learn 修正（日本語）
+
+以下はこのフォークの `main` に統合する Auto Learn の変更。
+AI審査による候補の却下や応答形式エラー、入力欄の取得失敗は起こり得るため、
+修正操作が必ず登録につながるわけではない。
+
+- **送信時に空になる入力欄**: T3 Code などの Chromium / Electron のチャット欄で、
+  送信後に入力欄が空になっても、最後に取得できた空でない内容から修正を検出する。
+  値の変更通知でも読み直し、貼り付け直後に本文を取得できない場合は短時間再試行する。
+- **WebKit の入力欄**: フォーカスされた Web 領域の選択位置から編集可能な親要素を探し、
+  通常の子要素一覧に現れない入力欄にも対応する。ページ全体の本文は探索しない。
+- **日本語文中の修正**: ひらがな・カタカナ・漢字・英数字の境界で差分を分け、
+  空白のない日本語の文全体ではなく、修正された語の周辺を候補として扱う。
+- **製品名・AI モデル名の表記**: 日本語音声認識で誤認識した公開製品名や、短い AI モデル名の
+  カナ表記を対応する英字識別子へ直した場合、AI 審査で置換のみの登録対象にできる。
+  一般的な役割名、名前の断片、大文字・小文字だけの変更は引き続き対象外とする。
+- **審査の待ち時間**: Auto Learn の AI 審査には専用の 45 秒のタイムアウトを使う。
+
+辞書設定の **Auto-Learn Dictionary** を有効にし、利用可能な AI プロバイダーとモデルを
+設定する。入力欄の読み取りには macOS のアクセシビリティ許可が必要。
+AI 審査を使うため、音声認識をローカルで実行していても、クラウドの審査プロバイダーを
+選んだ場合は修正候補のテキストがそのサービスへ送信される。
+入力欄のアクセシビリティ対応状況によっては修正を取得できないことがあり、
+すべてのアプリでの動作を保証するものではない。
+
+差分抽出と WebKit のフォーカス解決は、次の単体テストで確認できる。
+これらは実際のアプリでの入力操作や AI 審査結果を検証するテストではない。
+
+```shell
+bash Tests/run-auto-learn-correction-diff-tests.sh
+bash Tests/run-auto-learn-web-focus-tests.sh
+```
+
+## 個人配布用の DMG（日本語）
+
+このフォークのビルドは GitHub では配布しない。Developer ID で署名し、Apple の公証を通した
+DMG を個人的に配る。
+
+必要なもの:
+
+- Developer ID Application 証明書
+  （Xcode → Settings → Accounts → チームを選ぶ → Manage Certificates → 「+」）
+- App Store Connect API キー（`~/.appstoreconnect/private_keys/AuthKey_*.p8`）
+
+```shell
+make personal-dmg
+```
+
+`scripts/build-personal-dmg.sh` が archive → Developer ID で書き出し → DMG 作成 → 公証 →
+staple まで行う。出力は `~/Downloads/VoiceInk-dmg/VoiceInk.dmg`。証明書がない場合は作成手順を
+表示して止まる。公証を飛ばして署名と DMG だけ作る場合は `--skip-notarization`。
+
 ## このフォークを使う場合のビルドと起動（日本語）
 
-このフォーク（`RyoyaYahagi/VoiceInk`、ブランチ `local/mac-customizations`）は配布版と同じ
+このフォーク（`RyoyaYahagi/VoiceInk`）は配布版と同じ
 `make local` でビルドするが、**起動手順に 1 点だけ違いがある**: 成果物は `~/Downloads/VoiceInk.app`
 に作られるので、ランチャー（Raycast など）やアクセシビリティ許可の管理で standard に扱うため
 `/Applications` に置くこと。
@@ -101,12 +179,13 @@ voiceink-rebuild           # ビルドしない場合は --skip-build
 ### ローカルビルドの制約
 
 - ライセンス判定は常に「購入済み」になる（`#if LOCAL_BUILD` のブロックによる）。
-- iCloud 辞書同期と自動更新は無効。更新は `git pull` して再ビルドする。
-- API キーの保存先が配布版と別のキーチェーン名前空間
-  （`com.prakashjoshipax.VoiceInk.Local`）なので、配布版で入れたキーは引き継がれない。
-- bundle id は配布版と同じなので、履歴・辞書・設定はどちらでも共有される。
-  `~/Library/Application Support/com.prakashjoshipax.VoiceInk/` と
-  `~/Library/Preferences/com.prakashjoshipax.VoiceInk.plist` は消さないこと。
+- 自動更新は無効。更新は新しいリリースを入れ直すか、`git pull` して再ビルドする。
+- 辞書は iCloud コンテナ `iCloud.com.ryoyayahagi.KoeInk` で Mac と iOS の間で同期する。
+- bundle id は `com.ryoyayahagi.VoiceInk` で配布版と別。データは
+  `~/Library/Application Support/com.ryoyayahagi.VoiceInk/` に保存され、配布版
+  （`com.prakashjoshipax.VoiceInk`）と共存する。消すと履歴・辞書・設定が失われる。
+- API キーの保存先もローカルビルド専用のキーチェーン名前空間になる。配布版で入れた
+  キーは引き継がれない。
 
 
 ## Requirements

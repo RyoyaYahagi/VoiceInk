@@ -149,8 +149,17 @@ enum CorrectionDiffEngine {
                 results.append(
                     TextSegment(text: String(text[range]), range: range, isBoundary: true)
                 )
-            } else if segmentStart == nil {
-                segmentStart = index
+            } else {
+                if let start = segmentStart, index > start {
+                    let previous = text[text.index(before: index)]
+                    if isJapaneseScriptBoundary(previous, character) {
+                        let range = start..<index
+                        results.append(TextSegment(text: String(text[range]), range: range, isBoundary: false))
+                        segmentStart = index
+                    }
+                } else {
+                    segmentStart = index
+                }
             }
             index = text.index(after: index)
         }
@@ -164,12 +173,33 @@ enum CorrectionDiffEngine {
         return results
     }
 
+    /// Whitespace alone treats an entire Japanese clause as one changed word.
+    /// Split script runs so kana/Latin name corrections are bounded local edits,
+    /// without increasing the existing limit on unspaced text sent for review.
+    private static func isJapaneseScriptBoundary(_ previous: Character, _ current: Character) -> Bool {
+        let left = japaneseScriptGroup(previous)
+        let right = japaneseScriptGroup(current)
+        return left != right && (left != nil || right != nil)
+    }
+
+    private static func japaneseScriptGroup(_ character: Character) -> Int? {
+        guard let scalar = character.unicodeScalars.first else { return nil }
+        switch scalar.value {
+        case 0x3041...0x3096, 0x309D...0x309F: return 1 // Hiragana
+        case 0x30A1...0x30FA, 0x30FC...0x30FF, 0x31F0...0x31FF, 0xFF66...0xFF9F:
+            return 2 // Katakana, including prolonged sound marks
+        case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF, 0x20000...0x3134F:
+            return 3 // Han characters
+        default: return nil
+        }
+    }
+
     private static func isStructuralSeparator(
         at index: String.Index,
         in text: String
     ) -> Bool {
         let character = text[index]
-        if structuralSeparators.contains(character) { return true }
+        if structuralSeparators.contains(character) || character == "、" || character == "。" { return true }
 
         if character == "." {
             let next = text.index(after: index)

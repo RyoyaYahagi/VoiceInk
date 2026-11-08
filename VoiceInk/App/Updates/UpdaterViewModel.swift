@@ -145,7 +145,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate {
 
         // Preserve an explicit choice made through VoiceInk's previous Sparkle-backed
         // setting. With no saved choice, keep VoiceInk's existing opt-in default.
-        let preference = (defaults.object(forKey: DefaultsKey.sparkleAutomaticChecks) as? Bool) ?? true
+        let preference = (defaults.object(forKey: DefaultsKey.sparkleAutomaticChecks) as? Bool) ?? false
 
         defaults.set(preference, forKey: DefaultsKey.automaticUpdateChecks)
         return preference

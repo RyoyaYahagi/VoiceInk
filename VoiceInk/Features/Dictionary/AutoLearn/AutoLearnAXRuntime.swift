@@ -83,7 +83,7 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
                 lastReadableText: fieldText
             )
             logger.notice(
-                "Auto Learn observation armed fieldChars=\(fieldText.utf16.count, privacy: .public) pastedChars=\(observedPastedText.count, privacy: .public)"
+                "Auto Learn observation armed fieldChars=\(fieldText.utf16.count, privacy: .public) pastedChars=\(observedPastedText.count, privacy: .public) focusSource=\(reading.focusSource, privacy: .public) textSource=\(reading.source, privacy: .public)"
             )
             return .armed(token)
         }
@@ -93,8 +93,10 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
     func refreshSnapshot(token: AutoLearnPasteToken) async {
         await perform { [self] in
             guard var active = session, active.token == token else { return }
-            guard let value = textReader.textValue(from: active.targetElement) else { return }
-            active.lastReadableText = value.text
+            let value = textReader.textValue(from: active.targetElement)
+            // チャット系の入力欄は送信すると空になる。空の値で上書きすると
+            // 送信直前の修正後テキストを失うため、空でない値だけを控える。
+            if let value, !isBlank(value.text) { active.lastReadableText = value.text }
             session = active
         }
     }
@@ -108,12 +110,17 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
             session = nil
 
             defer { textReader.restoreWebAccessibility(processID: AXProcessID(active.appElement), appElement: active.appElement) }
+            let finalTextValue = textReader.textValue(from: active.targetElement)
             let finalFieldText: String
-            if let finalTextValue = textReader.textValue(from: active.targetElement) {
+            if let finalTextValue, !isBlank(finalTextValue.text) {
                 finalFieldText = finalTextValue.text
-            } else if let lastReadableText = active.lastReadableText {
-                logger.notice("Auto Learn snapshot recovered from the last readable value")
+            } else if let lastReadableText = active.lastReadableText, !isBlank(lastReadableText) {
+                logger.notice(
+                    "Auto Learn snapshot recovered from the last readable value finalState=\(finalTextValue == nil ? "unreadable" : "blank", privacy: .public)"
+                )
                 finalFieldText = lastReadableText
+            } else if let finalTextValue {
+                finalFieldText = finalTextValue.text
             } else {
                 logger.notice("Auto Learn snapshot skipped: target text unreadable")
                 return .skipped("target-text-unreadable")
@@ -156,6 +163,10 @@ final class AutoLearnAXRuntime: @unchecked Sendable {
             }
             session = nil
         }
+    }
+
+    private func isBlank(_ text: String) -> Bool {
+        AutoLearnTextNormalizer.accessibilityComparable(text).isEmpty
     }
 
     private func AXProcessID(_ element: AXUIElement) -> pid_t {

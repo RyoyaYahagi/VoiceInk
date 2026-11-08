@@ -144,8 +144,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
             self.assistantChat = nil
         }
 
-        let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.prakashjoshipax.VoiceInk")
+        let appSupportDirectory = AppPaths.appSupportDirectory
         self.recordingsDirectory = appSupportDirectory.appendingPathComponent("Recordings")
 
         self.serviceRegistry = TranscriptionServiceRegistry(

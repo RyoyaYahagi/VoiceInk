@@ -189,7 +189,12 @@ enum AutoLearnLimits {
     /// Web 系アプリでは確定時までに要素が読めなくなることがあるため。
     static let snapshotSamplingIntervalNanoseconds: UInt64 = 1_000_000_000
     static let verificationDelayNanoseconds: UInt64 = 120_000_000
+    /// 初回の読み取りで貼り付けが見つからないときの再試行間隔（合計約 1 秒）。
+    static let captureRetryDelaysNanoseconds: [UInt64] = [150_000_000, 300_000_000, 550_000_000]
     static let focusChangeGraceNanoseconds: UInt64 = 250_000_000
+    /// AI レビューは貼り付けを待たせない裏方の処理で、指示文も長い。
+    /// 文章整形用の短い待ち時間（既定 7 秒）では打ち切られることがあるため別に持つ。
+    static let reviewTimeoutSeconds: TimeInterval = 45
     static let accessibilityTimeoutSeconds: Float = 0.20
     static let captureAccessibilityTimeoutSeconds: Float = 0.10
     static let maximumFieldUTF16Length = 100_000

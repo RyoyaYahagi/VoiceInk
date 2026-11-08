@@ -21,7 +21,7 @@ final class DictionaryAutomaticBackup: ObservableObject {
     var enabled: Bool { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
     var defaultFolder: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.prakashjoshipax.VoiceInk/DictionaryBackups", isDirectory: true)
+            .appendingPathComponent("\(AppPaths.appSupportFolderName)/DictionaryBackups", isDirectory: true)
     }
 
     func start(context: ModelContext) {
