@@ -54,6 +54,38 @@ brew install --cask voiceink
 ### Build from Source
 As an open-source project, you can build VoiceInk yourself by following the instructions in [BUILDING.md](BUILDING.md). However, the compiled version includes additional benefits like automatic updates, priority support via Discord and email, and helps fund ongoing development.
 
+## このフォークの Auto Learn 修正（日本語）
+
+Auto Learn の最新修正は `fix/muse-autolearn` ブランチにある。
+`local/mac-customizations` は以前のカスタマイズ用ブランチで、以下の修正は含まない。
+
+- **送信時に空になる入力欄**: T3 Code などの Chromium / Electron のチャット欄で、
+  送信後に入力欄が空になっても、最後に取得できた空でない内容から修正を検出する。
+  値の変更通知でも読み直し、貼り付け直後に本文を取得できない場合は短時間再試行する。
+- **WebKit の入力欄**: フォーカスされた Web 領域の選択位置から編集可能な親要素を探し、
+  通常の子要素一覧に現れない入力欄にも対応する。ページ全体の本文は探索しない。
+- **日本語文中の修正**: ひらがな・カタカナ・漢字・英数字の境界で差分を分け、
+  空白のない日本語の文全体ではなく、修正された語の周辺を候補として扱う。
+- **製品名・AI モデル名の表記**: 日本語音声認識で誤認識した公開製品名や、短い AI モデル名の
+  カナ表記を対応する英字識別子へ直した場合、AI 審査で置換のみの登録対象にできる。
+  一般的な役割名、名前の断片、大文字・小文字だけの変更は引き続き対象外とする。
+- **審査の待ち時間**: Auto Learn の AI 審査には専用の 45 秒のタイムアウトを使う。
+
+辞書設定の **Auto-Learn Dictionary** を有効にし、利用可能な AI プロバイダーとモデルを
+設定する。入力欄の読み取りには macOS のアクセシビリティ許可が必要。
+AI 審査を使うため、音声認識をローカルで実行していても、クラウドの審査プロバイダーを
+選んだ場合は修正候補のテキストがそのサービスへ送信される。
+入力欄のアクセシビリティ対応状況によっては修正を取得できないことがあり、
+すべてのアプリでの動作を保証するものではない。
+
+差分抽出と WebKit のフォーカス解決は、次の単体テストで確認できる。
+これらは実際のアプリでの入力操作や AI 審査結果を検証するテストではない。
+
+```shell
+bash Tests/run-auto-learn-correction-diff-tests.sh
+bash Tests/run-auto-learn-web-focus-tests.sh
+```
+
 ## 個人配布用の DMG（日本語）
 
 このフォークのビルドは GitHub では配布しない。Developer ID で署名し、Apple の公証を通した
@@ -75,7 +107,7 @@ staple まで行う。出力は `~/Downloads/VoiceInk-dmg/VoiceInk.dmg`。証明
 
 ## このフォークを使う場合のビルドと起動（日本語）
 
-このフォーク（`RyoyaYahagi/VoiceInk`、ブランチ `local/mac-customizations`）は配布版と同じ
+このフォーク（`RyoyaYahagi/VoiceInk`）は配布版と同じ
 `make local` でビルドするが、**起動手順に 1 点だけ違いがある**: 成果物は `~/Downloads/VoiceInk.app`
 に作られるので、ランチャー（Raycast など）やアクセシビリティ許可の管理で standard に扱うため
 `/Applications` に置くこと。
