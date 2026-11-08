@@ -113,6 +113,32 @@ bash Tests/run-auto-learn-correction-diff-tests.sh
 bash Tests/run-auto-learn-web-focus-tests.sh
 ```
 
+## この Mac の HaaS-ja / Horizon 構成（日本語）
+
+以下はアプリ内蔵の機能ではなく、この Mac に別途配置したローカルサービス。
+このリポジトリの clone や `make local` だけでは導入されない。
+
+処理経路は VoiceInk のカスタム文字起こし接続先 → 8081 の互換プロキシ →
+8080 の HaaS-ja 音声認識で、認識結果を返す際にプロキシが Horizon で句読点を補完する。
+カスタム接続先には `http://127.0.0.1:8081/v1/audio/transcriptions` を使う。
+
+| 構成要素 | この Mac での配置・役割 |
+| --- | --- |
+| HaaS-ja / speech.cpp | `~/.local/bin/speech serve haas-ja-v1.0:q4_k --port 8080` で日本語を文字起こしする。 |
+| 互換プロキシ | `~/.local/share/speech-proxy/proxy-horizon.py`。VoiceInkが送る `temperature` を取り除いて8080へ中継する。 |
+| Horizon | プロキシの `horizon-venv` と `horizon-model` に配置したPython環境・ローカルONNXモデルで句読点を補完する。補完失敗時は認識結果をそのまま返す。 |
+| 自動起動 | `~/Library/LaunchAgents/com.yappa.speech-haas.plist` と `com.yappa.speech-proxy.plist` がサービスを起動する。 |
+| ログ | `~/Library/Logs/speech-haas.log` と `speech-proxy.log`。 |
+
+`GET http://127.0.0.1:8081/_voiceink/health` の `punctuation` で補完モデルの準備状態を確認できる。
+文字起こし応答の `X-VoiceInk-Punctuation` ヘッダーでも補完の適用状況を確認できる。
+この確認はプロキシの状態確認であり、音声認識の精度やVoiceInkからの接続成功を保証するものではない。
+
+上記の実行ファイル、Pythonコード・環境、モデル、LaunchAgent、VoiceInkの接続設定は
+このリポジトリに含まれない。別のMacで再現するには、これらを別途用意して設定する必要がある。
+また、ローカル文字起こしを使っていても、AI補正やAuto Learnにクラウドを選んだ場合は
+その処理のテキストが外部送信される。
+
 ## 個人配布用の DMG（日本語）
 
 このフォークのビルドは GitHub では配布しない。Developer ID で署名し、Apple の公証を通した
