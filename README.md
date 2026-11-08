@@ -56,7 +56,7 @@ As an open-source project, you can build VoiceInk yourself by following the inst
 
 ## フォーク独自の変更一覧（日本語）
 
-このリポジトリは `Beingpax/VoiceInk` を元にした `RyoyaYahagi/VoiceInk`。
+このリポジトリは上流の VoiceInk を元にしたフォーク。
 カスタマイズの統合先はこのフォークの `main`。上のダウンロード先・Homebrew・リリースバッジは
 フォーク元の配布版を指し、以下の変更を含むビルドの入手先ではない。
 
@@ -72,7 +72,7 @@ As an open-source project, you can build VoiceInk yourself by following the inst
 | 手動の修正登録 | 自動取得できない入力欄で手動登録を案内する。辞書設定から置換登録を開けるほか、履歴の元テキストを使って修正を登録できる。 | `98e2dd35`, `12984c9e` |
 | 自動学習の統計 | アプリ別の取得・候補生成などの状況と、AI審査の利用量を記録する。入力欄ごとの学習状況を確認するために使う。 | `12984c9e` |
 | 利用量と推定料金 | 文字起こしの処理先別に回数・録音時間・失敗・中止を月別（UTC）で記録する。AI補正と自動学習の審査も別に集計し、組み込み単価と文字数などから推定料金を表示する。実請求やサービス側の残枠とは一致しない。料金表示の文字色も調整した。 | `466a2a85`, `12984c9e`, `fc1dfdce` |
-| iCloud辞書同期 | ローカルビルドで `iCloud.com.ryoyayahagi.KoeInk` を使ってMacとiOSの辞書を同期する。CloudKitの取り込み完了後に重複エントリを整理する。対応する署名・権限・iCloudアカウントが必要。 | `5c8b1302`, `6e03f810` |
+| iCloud辞書同期 | 設定したiCloudコンテナを使ってMacとiOSの辞書を同期する。CloudKitの取り込み完了後に重複エントリを整理する。対応する署名・権限・iCloudアカウントが必要。 | `5c8b1302`, `6e03f810` |
 | フォークのデータ分離 | bundle id・データ保存先・キーチェーンを配布版から分離し、フォーク元の自動更新を無効化した。詳細は後述のローカルビルドの制約を参照。 | `8a4f2b31`, `5c8b1302` |
 | ビルド・個人配布 | ローカルビルドと起動手順、DMG作成を追加した。GitHubリリース公開用の構成を経て、現在はDeveloper ID署名・Apple公証を行う個人配布用DMGを作る。公証は状態をポーリングして待つ。 | `9e3d6aef`, `b1a0903f`, `6ec2663b`, `3a1b3941` |
 | README整備 | データ保存先・iCloud・起動手順・Auto Learnの変更と利用条件を記載した。 | `805b6277`, `b3008b95` |
@@ -113,6 +113,28 @@ bash Tests/run-auto-learn-correction-diff-tests.sh
 bash Tests/run-auto-learn-web-focus-tests.sh
 ```
 
+## HaaS-ja / Horizon の外部連携（日本語）
+
+HaaS-jaによる日本語音声認識と、Horizonによる句読点補完をローカルサービス経由で利用できる。
+これらはアプリ内蔵ではなく、実行ファイル・プロキシ・Python環境・モデルを別途用意する構成。
+このリポジトリの clone や `make local` だけでは導入されない。
+
+処理経路は VoiceInk のカスタム文字起こし接続先 → 互換プロキシ → HaaS-ja。
+認識結果を返す際にプロキシがHorizonで句読点を補完する。
+VoiceInk側には、プロキシのOpenAI互換文字起こしエンドポイントと対応するモデル名を設定する。
+
+- **互換プロキシ**: VoiceInkが送る `temperature` を取り除いて音声認識サーバーへ中継する。
+- **Horizon**: ローカルONNXモデルで元の文字・空白・既存の句読点を保ちながら句読点を追加する。
+  Python依存、トークナイザー、モデル設定、ONNXモデルが必要。補完失敗時は認識結果をそのまま返す。
+- **補完対象**: 成功した通常のJSON文字起こし応答の `text`（16,000文字以下）。
+  `segments` / `words` を含む応答、JSON以外、エラー応答は変更しない。
+- **状態確認**: プロキシの `/_voiceink/health` と `X-VoiceInk-Punctuation` 応答ヘッダーで確認する。
+  これらは音声認識の精度やVoiceInkからの接続成功を保証するものではない。
+
+自動起動・ログ出力先・接続ポートは利用環境に合わせて設定する。
+ローカル文字起こしを使っていても、AI補正やAuto Learnにクラウドを選んだ場合は
+その処理のテキストが外部送信される。
+
 ## 個人配布用の DMG（日本語）
 
 このフォークのビルドは GitHub では配布しない。Developer ID で署名し、Apple の公証を通した
@@ -134,14 +156,18 @@ staple まで行う。出力は `~/Downloads/VoiceInk-dmg/VoiceInk.dmg`。証明
 
 ## このフォークを使う場合のビルドと起動（日本語）
 
-このフォーク（`RyoyaYahagi/VoiceInk`）は配布版と同じ
+このフォークは配布版と同じ
 `make local` でビルドするが、**起動手順に 1 点だけ違いがある**: 成果物は `~/Downloads/VoiceInk.app`
 に作られるので、ランチャー（Raycast など）やアクセシビリティ許可の管理で standard に扱うため
 `/Applications` に置くこと。
 
 ### ビルドから起動まで
 
-前提: Xcode（現在 Xcode 27 / Swift 6.4）、Homebrew が導入済みであること。初回は Metal
+前提: 対応するXcodeとHomebrewが導入済みであること。
+`make local` は Apple Development による自動署名が必須で、ad-hoc署名へのフォールバックはない。
+署名チームは `LocalBuild.xcconfig` の `DEVELOPMENT_TEAM` で設定する。
+別の開発者がビルドする場合は、自分のチーム・bundle id・iCloudコンテナと権限に合わせて
+`LocalBuild.xcconfig` と `VoiceInk/VoiceInk.local.entitlements` を調整する。初回は Metal
 ツールチェーンが必要になる場合がある（`xcodebuild -downloadComponent MetalToolchain`）。
 
 ```shell
@@ -151,6 +177,9 @@ make check
 # 2. ローカルビルド（約 8 分。毎回フルビルドになる）
 make local
 
+# 出力先を変える場合: make local APP_OUTPUT_DIR=/path/to/output
+# 署名証明書を指定する場合: make local LOCAL_CODESIGN_IDENTITY="Apple Development: ..."
+
 # 3. 起動中の VoiceInk を終了してから、確実に新しい方を使わせる
 osascript -e 'tell application "VoiceInk" to quit'
 rm -rf /Applications/VoiceInk.app
@@ -159,12 +188,7 @@ xattr -cr /Applications/VoiceInk.app   # 隔離属性の除去
 open -a /Applications/VoiceInk.app
 ```
 
-```shell
-# この Mac 用の 1 コマンド版（上記の 2〜3 を自動化）
-voiceink-rebuild           # ビルドしない場合は --skip-build
-```
-
-実装は `~/.local/bin/voiceink-rebuild`（このリポジトリには含まれない）。
+既存アプリをDMGにまとめるだけなら `make package-dmg` を使える（ビルド・署名は行わない）。
 
 ### よく出る確認ダイアログ
 
@@ -172,7 +196,7 @@ voiceink-rebuild           # ビルドしない場合は --skip-build
   の…を使用しようとしています」）: ローカルビルドが API キーやライセンスキーを保存・読み出す
   ときに macOS が確認しているだけ。**「常に許可」か「許可」で問題ない**。ad-hoc 署名や別の
   署名に変えるたびに再確認を求められるが、安定した Apple Development 証明書（`make local`
-  が自動で選ぶ）で署名されていれば再表示されない。
+  が指定する）を使い続けることで、再確認を抑えられる。
 - **アクセシビリティ／マイクの許可**: 署名を変えてインストールし直すたびにやり直しが必要。
   安定した証明書を 1 つ使い続ければ再設定は不要。
 
@@ -180,10 +204,13 @@ voiceink-rebuild           # ビルドしない場合は --skip-build
 
 - ライセンス判定は常に「購入済み」になる（`#if LOCAL_BUILD` のブロックによる）。
 - 自動更新は無効。更新は新しいリリースを入れ直すか、`git pull` して再ビルドする。
-- 辞書は iCloud コンテナ `iCloud.com.ryoyayahagi.KoeInk` で Mac と iOS の間で同期する。
-- bundle id は `com.ryoyayahagi.VoiceInk` で配布版と別。データは
-  `~/Library/Application Support/com.ryoyayahagi.VoiceInk/` に保存され、配布版
-  （`com.prakashjoshipax.VoiceInk`）と共存する。消すと履歴・辞書・設定が失われる。
+- 辞書は設定したiCloudコンテナでMacとiOSの間で同期する。
+- フォーク専用のbundle idとApplication Support内のデータフォルダを使い、配布版と共存する。
+  実際の識別子・保存先はビルド設定と `AppPaths` を参照。データを消すと履歴・辞書・設定が失われる。
+- 初回起動時に旧bundle id `com.prakashjoshipax.VoiceInk` の設定を、現在の設定にないキーだけ
+  コピーする。履歴DB・辞書DB・モデルファイルをコピーする処理ではない。
+- データ分離には Whisper / TranscribeCpp / Refine のモデル保存先も含む。RefineのXPCサービスも
+  ローカルビルドでは専用bundle idを使う。Debugビルドでは辞書のCloudKit同期を無効にする。
 - API キーの保存先もローカルビルド専用のキーチェーン名前空間になる。配布版で入れた
   キーは引き継がれない。
 
