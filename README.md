@@ -121,6 +121,8 @@ bash Tests/run-auto-learn-web-focus-tests.sh
 処理経路は VoiceInk のカスタム文字起こし接続先 → 8081 の互換プロキシ →
 8080 の HaaS-ja 音声認識で、認識結果を返す際にプロキシが Horizon で句読点を補完する。
 カスタム接続先には `http://127.0.0.1:8081/v1/audio/transcriptions` を使う。
+この Mac の保存済み設定では表示名・リクエストのモデル名ともに `Haas-ja-v1.0` を使っている。
+サーバーの起動時モデル識別子 `haas-ja-v1.0:q4_k` とは区別する。
 
 | 構成要素 | この Mac での配置・役割 |
 | --- | --- |
@@ -133,6 +135,12 @@ bash Tests/run-auto-learn-web-focus-tests.sh
 `GET http://127.0.0.1:8081/_voiceink/health` の `punctuation` で補完モデルの準備状態を確認できる。
 文字起こし応答の `X-VoiceInk-Punctuation` ヘッダーでも補完の適用状況を確認できる。
 この確認はプロキシの状態確認であり、音声認識の精度やVoiceInkからの接続成功を保証するものではない。
+
+Horizonは `horizon_punctuation.py` を使い、`requirements.txt` のPython依存と
+`tokenizer.json`・`config.json`・`onnx/model_quantized.onnx` を必要とする。
+補完対象は成功した通常のJSON文字起こし応答の `text`（16,000文字以下）。
+`segments` / `words` を含む応答、JSON以外、エラー応答は変更しない。
+元の文字・空白・既存の句読点を保ち、句読点だけを追加する。
 
 上記の実行ファイル、Pythonコード・環境、モデル、LaunchAgent、VoiceInkの接続設定は
 このリポジトリに含まれない。別のMacで再現するには、これらを別途用意して設定する必要がある。
@@ -167,7 +175,11 @@ staple まで行う。出力は `~/Downloads/VoiceInk-dmg/VoiceInk.dmg`。証明
 
 ### ビルドから起動まで
 
-前提: Xcode（現在 Xcode 27 / Swift 6.4）、Homebrew が導入済みであること。初回は Metal
+前提: Xcode（この Mac の環境は Xcode 27 / Swift 6.4）、Homebrew が導入済みであること。
+`make local` は Apple Development による自動署名が必須で、ad-hoc署名へのフォールバックはない。
+`LocalBuild.xcconfig` の `DEVELOPMENT_TEAM` はこのフォークのチーム `2L6CD9CNHL` に固定されている。
+別の開発者がビルドする場合は、自分のチーム・bundle id・iCloudコンテナと権限に合わせて
+`LocalBuild.xcconfig` と `VoiceInk/VoiceInk.local.entitlements` を調整する。初回は Metal
 ツールチェーンが必要になる場合がある（`xcodebuild -downloadComponent MetalToolchain`）。
 
 ```shell
@@ -176,6 +188,9 @@ make check
 
 # 2. ローカルビルド（約 8 分。毎回フルビルドになる）
 make local
+
+# 出力先を変える場合: make local APP_OUTPUT_DIR=/path/to/output
+# 署名証明書を指定する場合: make local LOCAL_CODESIGN_IDENTITY="Apple Development: ..."
 
 # 3. 起動中の VoiceInk を終了してから、確実に新しい方を使わせる
 osascript -e 'tell application "VoiceInk" to quit'
@@ -191,6 +206,9 @@ voiceink-rebuild           # ビルドしない場合は --skip-build
 ```
 
 実装は `~/.local/bin/voiceink-rebuild`（このリポジトリには含まれない）。
+この補助スクリプトのソース参照先は `/Users/yappa/code/app/voiceink`、成果物の参照先は
+`~/Downloads/VoiceInk.app` に固定されている。別のMacや出力先で使う場合は調整が必要。
+既存アプリをDMGにまとめるだけなら `make package-dmg` を使える（ビルド・署名は行わない）。
 
 ### よく出る確認ダイアログ
 
@@ -198,7 +216,7 @@ voiceink-rebuild           # ビルドしない場合は --skip-build
   の…を使用しようとしています」）: ローカルビルドが API キーやライセンスキーを保存・読み出す
   ときに macOS が確認しているだけ。**「常に許可」か「許可」で問題ない**。ad-hoc 署名や別の
   署名に変えるたびに再確認を求められるが、安定した Apple Development 証明書（`make local`
-  が自動で選ぶ）で署名されていれば再表示されない。
+  が指定する）を使い続けることで、再確認を抑えられる。
 - **アクセシビリティ／マイクの許可**: 署名を変えてインストールし直すたびにやり直しが必要。
   安定した証明書を 1 つ使い続ければ再設定は不要。
 
@@ -210,6 +228,10 @@ voiceink-rebuild           # ビルドしない場合は --skip-build
 - bundle id は `com.ryoyayahagi.VoiceInk` で配布版と別。データは
   `~/Library/Application Support/com.ryoyayahagi.VoiceInk/` に保存され、配布版
   （`com.prakashjoshipax.VoiceInk`）と共存する。消すと履歴・辞書・設定が失われる。
+- 初回起動時に旧bundle id `com.prakashjoshipax.VoiceInk` の設定を、現在の設定にないキーだけ
+  コピーする。履歴DB・辞書DB・モデルファイルをコピーする処理ではない。
+- データ分離には Whisper / TranscribeCpp / Refine のモデル保存先も含む。RefineのXPCサービスも
+  ローカルビルドでは専用bundle idを使う。Debugビルドでは辞書のCloudKit同期を無効にする。
 - API キーの保存先もローカルビルド専用のキーチェーン名前空間になる。配布版で入れた
   キーは引き継がれない。
 
