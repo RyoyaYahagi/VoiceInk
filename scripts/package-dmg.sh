@@ -22,13 +22,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ditto "$APP_PATH" "$STAGE/VoiceInk.app"
 cp "$REPO_ROOT/LICENSE" "$STAGE/LICENSE.txt"
+DISTRIBUTION="${VOICEINK_DISTRIBUTION_DIR:-$OUTPUT_DIR/distribution}"
+for required in Licenses CorrespondingSource.tar.gz DEPENDENCIES.json 第三者ソフトウェアの告知.md ソースの利用方法.md SHA256SUMS; do
+    if [[ ! -e "$DISTRIBUTION/$required" ]]; then
+        echo "error: distribution support missing: $required (run scripts/prepare-distribution.py)" >&2
+        exit 1
+    fi
+    ditto "$DISTRIBUTION/$required" "$STAGE/$required"
+done
 COMMIT=$(git -C "$REPO_ROOT" rev-parse HEAD)
 cat > "$STAGE/Source Code.txt" <<SOURCE
 VoiceInk fork $VERSION ($BUILD)
 Source: https://github.com/RyoyaYahagi/VoiceInk/tree/$COMMIT
 Source archive: https://github.com/RyoyaYahagi/VoiceInk/archive/$COMMIT.tar.gz
-License: GNU GPL version 3 (see LICENSE.txt).
-HaaS/Horizon and cloud API keys are installed/configured separately; see README.md.
+ライセンス: GNU GPL version 3（LICENSE.txt）。
+対応ソースと依存ソース: CorrespondingSource.tar.gz
+依存物のライセンス原文: Licenses
+詳しい案内: ソースの利用方法.md、第三者ソフトウェアの告知.md
+HaaS/Horizonは別途導入します。Silero VADモデルは同梱します。
 SOURCE
 xattr -cr "$STAGE/VoiceInk.app"
 ln -s /Applications "$STAGE/Applications"
