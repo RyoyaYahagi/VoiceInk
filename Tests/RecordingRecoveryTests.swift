@@ -12,9 +12,16 @@ struct ImportedWhisperModel: TranscriptionModel {
 }
 struct CloudModel: TranscriptionModel { let name = "cloud"; let displayName = "Cloud"; let provider: ModelProvider = .gemini }
 struct ModelContext {}
+struct RecordingVocabulary { let terms: [String]; init(savedTerms: [String] = []) { terms = savedTerms } }
+@MainActor final class CustomVocabularyService {
+    static let shared = CustomVocabularyService()
+    func loadSavedVocabulary(from: ModelContext) -> RecordingVocabulary { .init() }
+}
 struct TranscriptionRequestContext {
+    func withVocabulary(_ value: RecordingVocabulary) -> Self { var copy = self; copy.vocabulary = value; return copy }
     var language: String? = "ja-JP"
     var prompt: String? = nil
+    var vocabulary: RecordingVocabulary? = nil
     static let currentDefaults = Self()
     func scoped(to model: any TranscriptionModel) -> Self { self }
 }
@@ -34,21 +41,23 @@ enum TestError: Error { case offline }
     static var primary = 0
     static var local = 0
     static var localLanguage: String?
+    static var primaryVocabulary: [String]?
+    static var localVocabulary: [String]?
     static var localFails = false
     static var cancelDuringPrimary: (() -> Void)?
 }
 struct WhisperTranscriptionService: TranscriptionService {
     init(modelsDirectory: URL, modelProvider: (any WhisperModelProvider)?) {}
     func transcribe(audioURL: URL, model: any TranscriptionModel, context: TranscriptionRequestContext) async throws -> String {
-        await MainActor.run { FakeCalls.local += 1; FakeCalls.localLanguage = context.language }
+        await MainActor.run { FakeCalls.local += 1; FakeCalls.localLanguage = context.language; FakeCalls.localVocabulary = context.vocabulary?.terms }
         if await FakeCalls.localFails { throw TestError.offline }
         return "local text"
     }
 }
 struct CloudTranscriptionService: TranscriptionService {
-    init(modelContext: ModelContext) {}
+    init() {}
     func transcribe(audioURL: URL, model: any TranscriptionModel, context: TranscriptionRequestContext) async throws -> String {
-        await MainActor.run { FakeCalls.primary += 1; FakeCalls.cancelDuringPrimary?() }
+        await MainActor.run { FakeCalls.primary += 1; FakeCalls.primaryVocabulary = context.vocabulary?.terms; FakeCalls.cancelDuringPrimary?() }
         throw TestError.offline
     }
 }
@@ -63,18 +72,18 @@ struct TranscribeCppTranscriptionService: TranscriptionService {
     func transcribe(audioURL: URL, model: any TranscriptionModel, context: TranscriptionRequestContext) async throws -> String { throw TestError.offline }
     func cleanup() {}
 }
-@MainActor protocol TranscriptionSession { func transcribe(audioURL: URL) async throws -> String; func cancel() }
+@MainActor protocol TranscriptionSession { func transcribe(audioURL: URL, vocabulary: RecordingVocabulary) async throws -> String; func cancel() }
 @MainActor class FileTranscriptionSession: TranscriptionSession {
     init(service: any TranscriptionService) {}
     var canceled = false
-    func transcribe(audioURL: URL) async throws -> String { throw TestError.offline }
+    func transcribe(audioURL: URL, vocabulary: RecordingVocabulary) async throws -> String { throw TestError.offline }
     func cancel() { canceled = true }
 }
 @MainActor final class StreamingTranscriptionSession: FileTranscriptionSession {
     init(streamingService: StreamingTranscriptionService, fallbackService: any TranscriptionService) { super.init(service: fallbackService) }
 }
 struct StreamingTranscriptionService {
-    init(modelContext: ModelContext, fluidAudioService: FluidAudioTranscriptionService?, onPartialTranscript: ((String) -> Void)?) {}
+    init(fluidAudioService: FluidAudioTranscriptionService?, onPartialTranscript: ((String) -> Void)?) {}
 }
 enum AudioFileMetadata { static func duration(for url: URL) async -> Double { 30 } }
 @MainActor final class ProviderUsageStore {
@@ -102,9 +111,10 @@ enum LocalRecoverySettings {
         provider.availableModels = [ModelFile(name: "multilingual", url: temp)]
         let registry = TranscriptionServiceRegistry(modelProvider: provider, modelsDirectory: temp.deletingLastPathComponent(), modelContext: ModelContext())
         let configuration = TranscriptionRuntimeConfiguration(model: CloudModel())
-        let result = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, shouldCancel: { false })
+        let result = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, vocabulary: .init(savedTerms: ["KoeInk"]), shouldCancel: { false })
         precondition(result.text == "local text" && result.modelName.contains("local recovery"))
         precondition(FakeCalls.primary == 1 && FakeCalls.local == 1 && FakeCalls.localLanguage == "ja")
+        precondition(FakeCalls.primaryVocabulary == ["KoeInk"] && FakeCalls.localVocabulary == ["KoeInk"])
         precondition(ProviderUsageStore.shared.events.count == 2)
         precondition(ProviderUsageStore.shared.events[0].1 && !ProviderUsageStore.shared.events[1].1)
         print("PASS cloud failure recovers locally, normalizes language and records both providers")
@@ -113,29 +123,29 @@ enum LocalRecoverySettings {
             do { try await operation(); preconditionFailure("Expected error") } catch {}
         }
         LocalRecoverySettings.isEnabled = false
-        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, shouldCancel: { false }) }
+        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, vocabulary: .init(), shouldCancel: { false }) }
         precondition(FakeCalls.local == 1)
         LocalRecoverySettings.isEnabled = true
         provider.availableModels = [ModelFile(name: "english.en", url: temp)]
-        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, shouldCancel: { false }) }
+        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, vocabulary: .init(), shouldCancel: { false }) }
         precondition(FakeCalls.local == 1)
         provider.availableModels = [ModelFile(name: "multilingual", url: temp)]
         UserDefaults.standard.set("missing", forKey: LocalRecoverySettings.modelKey)
-        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, shouldCancel: { false }) }
+        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, vocabulary: .init(), shouldCancel: { false }) }
         precondition(FakeCalls.local == 1)
         UserDefaults.standard.removeObject(forKey: LocalRecoverySettings.modelKey)
         print("PASS disabled recovery, incompatible language and missing selected model do not retry")
 
         var canceled = false
         FakeCalls.cancelDuringPrimary = { canceled = true }
-        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, shouldCancel: { canceled }) }
+        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, vocabulary: .init(), shouldCancel: { canceled }) }
         precondition(FakeCalls.local == 1 && ProviderUsageStore.shared.events.last!.2)
         FakeCalls.cancelDuringPrimary = nil
-        let session = FileTranscriptionSession(service: CloudTranscriptionService(modelContext: ModelContext()))
-        _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: session, shouldCancel: { false })
+        let session = FileTranscriptionSession(service: CloudTranscriptionService())
+        _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: session, vocabulary: .init(), shouldCancel: { false })
         precondition(session.canceled && FakeCalls.local == 2)
         FakeCalls.localFails = true
-        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, shouldCancel: { false }) }
+        await expectFailure { _ = try await registry.transcribeRecording(audioURL: temp, configuration: configuration, session: nil, vocabulary: .init(), shouldCancel: { false }) }
         precondition(FakeCalls.local == 3)
         print("PASS cancellation never recovers, failed stream is canceled, local error does not recurse")
     }

@@ -80,38 +80,50 @@ As an open-source project, you can build VoiceInk yourself by following the inst
 音声認識の実行先、AI補正、自動学習の審査、iCloud同期はそれぞれ独立した設定・通信経路になる。
 上の「100% offline」はローカル処理を選んだ場合の説明であり、クラウド機能を使う場合には当てはまらない。
 
-## このフォークの Auto Learn 修正（日本語）
+## 本家2.26の試験統合（日本語）
 
-以下はこのフォークの `main` に統合する Auto Learn の変更。
-AI審査による候補の却下や応答形式エラー、入力欄の取得失敗は起こり得るため、
-修正操作が必ず登録につながるわけではない。
+このブランチは本家の2.26（`4bc74cad`）を統合して検証するためのもの。
+既存のフォークのmainや、インストール済みアプリは自動で更新しない。
+本家のAuto Learn、Smart Punctuation、入力・録音・ストリーミングの改善を取り込み、
+日本語フィラー除去、WebKit入力欄の取得、利用量集計、辞書バックアップ、
+iCloud同期、ローカルビルドのデータ分離を維持する。
 
-- **送信時に空になる入力欄**: T3 Code などの Chromium / Electron のチャット欄で、
-  送信後に入力欄が空になっても、最後に取得できた空でない内容から修正を検出する。
-  値の変更通知でも読み直し、貼り付け直後に本文を取得できない場合は短時間再試行する。
-- **WebKit の入力欄**: フォーカスされた Web 領域の選択位置から編集可能な親要素を探し、
-  通常の子要素一覧に現れない入力欄にも対応する。ページ全体の本文は探索しない。
-- **日本語文中の修正**: ひらがな・カタカナ・漢字・英数字の境界で差分を分け、
-  空白のない日本語の文全体ではなく、修正された語の周辺を候補として扱う。
-- **製品名・AI モデル名の表記**: 日本語音声認識で誤認識した公開製品名や、短い AI モデル名の
-  カナ表記を対応する英字識別子へ直した場合、AI 審査で置換のみの登録対象にできる。
-  一般的な役割名、名前の断片、大文字・小文字だけの変更は引き続き対象外とする。
-- **審査の待ち時間**: Auto Learn の AI 審査には専用の 45 秒のタイムアウトを使う。
+### Auto Learnの変更と利用条件
 
-辞書設定の **Auto-Learn Dictionary** を有効にし、利用可能な AI プロバイダーとモデルを
-設定する。入力欄の読み取りには macOS のアクセシビリティ許可が必要。
-AI 審査を使うため、音声認識をローカルで実行していても、クラウドの審査プロバイダーを
-選んだ場合は修正候補のテキストがそのサービスへ送信される。
-入力欄のアクセシビリティ対応状況によっては修正を取得できないことがあり、
-すべてのアプリでの動作を保証するものではない。
+本家の新方式に合わせ、学習は主に置換候補の提示として扱う。
+新規設定では外部AIを使わないルール審査を利用でき、必要な訂正回数を1〜3回で選べる。
+AI審査を設定した場合は自動／手動を選択できる。手動審査では「Review Now」で審査し、
+承認された候補を登録する。既存のAIプロバイダー・モデルと手動送信の設定は移行する。
+旧方式の「置換と語彙を同時登録する」審査指示は使わない。
 
-差分抽出と WebKit のフォーカス解決は、次の単体テストで確認できる。
-これらは実際のアプリでの入力操作や AI 審査結果を検証するテストではない。
+- 日本語の製品名やAIモデル名の音声認識誤りは、同じ語の表記を復元する場合に置換候補とする。
+  一般的な役割名や、長い名前の一部だけの危険な置換は審査対象から除外する。
+- 送信後に空になるWeb入力欄は、最後に読めた空でない内容から訂正を検出する。
+  値の変更通知、定期的な読み直し、貼り付け直後の短時間の再試行を維持する。
+- WebKitでは選択位置から編集可能な親要素を探す。日本語の差分は文字種の境界で分割する。
+- 取得失敗時の手動登録案内、辞書画面からの手動登録、取得統計、AI審査の利用量集計を維持する。
+- AI審査には専用の45秒以上のタイムアウトを使う。
+
+入力欄の読み取りにはmacOSのアクセシビリティ許可が必要。
+入力欄によって取得できない場合があり、すべての訂正が登録される保証はない。
+クラウドのAI審査を選ぶと修正候補のテキストがそのプロバイダーへ送信される。
+本家のSmart Punctuationは入力位置に合わせた空白・大文字・句読点の調整であり、
+次節のHorizonによる日本語の句読点補完とは別の処理。
+
+オフラインの確認:
 
 ```shell
 bash Tests/run-auto-learn-correction-diff-tests.sh
 bash Tests/run-auto-learn-web-focus-tests.sh
+bash Tests/run-output-filter-tests.sh
+bash Tests/run-reliability-tests.sh
+bash Tests/run-recording-speech-gate-tests.sh
 ```
+
+これらは本番の外部AIや実際のアプリ入力欄での審査・登録、iCloudの端末間同期を
+検証するものではない。試験ビルドも通常のフォークと同じデータ保存先を使うため、
+起動して試す前に辞書を書き出して保管する。新しいAuto Learnは候補ファイルを移行するので、
+旧版へ戻しても新しい候補が旧版で読めるとは限らない。
 
 ## HaaS-ja / Horizon の外部連携（日本語）
 
@@ -261,7 +273,6 @@ If you encounter any issues or have questions, please:
 - [LaunchAtLogin](https://github.com/sindresorhus/LaunchAtLogin) - Launch at login functionality
 - [MediaRemoteAdapter](https://github.com/ejbills/mediaremote-adapter) - Media playback control during recording
 - [Zip](https://github.com/marmelroy/Zip) - File compression and decompression utilities
-- [SelectedTextKit](https://github.com/tisfeng/SelectedTextKit) - A modern macOS library for getting selected text
 - [Swift Atomics](https://github.com/apple/swift-atomics) - Low-level atomic operations for thread-safe concurrent programming
 
 

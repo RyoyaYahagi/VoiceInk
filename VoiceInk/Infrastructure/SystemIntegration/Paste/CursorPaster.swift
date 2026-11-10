@@ -29,6 +29,7 @@ class CursorPaster {
 
     @MainActor
     private static var pasteQueueTask: Task<Void, Never>?
+    private static let textContextReader = PasteTextContextReader()
 
     static func pasteAtCursor(_ text: String) {
         Task {
@@ -41,12 +42,12 @@ class CursorPaster {
 
     @MainActor
     @discardableResult
-    static func startPasteAtCursor(_ text: String) -> Task<PasteOutcome, Never> {
+    static func startPasteAtCursor(_ text: String, sendKey: FinishAndSendKey = .none) -> Task<PasteOutcome, Never> {
         let requestedAt = ProcessInfo.processInfo.systemUptime
         let previousPasteTask = pasteQueueTask
         let sessionTask = Task { @MainActor in
             await previousPasteTask?.value
-            return await performPasteSession(text, requestedAt: requestedAt)
+            return await performPasteSession(text, sendKey: sendKey, requestedAt: requestedAt)
         }
 
         pasteQueueTask = Task { @MainActor in
@@ -61,15 +62,37 @@ class CursorPaster {
     }
 
     @MainActor
-    private static func performPasteSession(_ text: String, requestedAt: TimeInterval) async -> (
+    private static func performPasteSession(_ text: String, sendKey: FinishAndSendKey, requestedAt: TimeInterval) async -> (
         outcome: PasteOutcome, clipboardRestoreTask: Task<Void, Never>?
     ) {
         let startedAt = ProcessInfo.processInfo.systemUptime
         let queueWaitMs = elapsedMilliseconds(since: requestedAt)
         let sessionID = UUID().uuidString
         let method = PasteMethod.current()
-        let textToDeliver = method == .directTyping ? DirectTextTyper.normalizedText(text) : text
+        let originalText = method.usesClipboard ? text : DirectTextTyper.normalizedText(text)
+        var textToDeliver = originalText
+        let smartPunctuation = UserDefaults.standard.bool(forKey: SmartPunctuation.settingsKey)
         let pasteboard: NSPasteboard? = method.usesClipboard ? NSPasteboard.general : nil
+        if smartPunctuation {
+            // Settle focus before reading, rather than retaining context across the paste delay.
+            if method.usesClipboard || method == .remoteTyping { await wait(prePasteDelay) }
+            if let processID = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                let snapshot = await textContextReader.read(processID: processID) {
+                let adjusted = SmartPunctuation.adjusted(originalText, context: snapshot.context)
+                if adjusted != originalText {
+                    let current = await textContextReader.read(processID: processID)
+                    if NSWorkspace.shared.frontmostApplication?.processIdentifier == processID,
+                        PasteTextContextReader.matches(snapshot, current) {
+                        textToDeliver = adjusted
+                    }
+                }
+            }
+        }
+        if method == .remoteTyping, let prepared = RemoteTextTyper.textForTyping(textToDeliver) {
+            // Auto Learn should observe what was actually typed, while history
+            // keeps the original transcript unchanged.
+            textToDeliver = prepared
+        }
         let shouldRestoreClipboard = pasteboard != nil
             && UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste")
         let savedContents: ClipboardSnapshot
@@ -87,15 +110,22 @@ class CursorPaster {
                 return (PasteOutcome(result: .commandNotPosted, autoLearnGeneration: nil), nil)
             }
 
-            await wait(prePasteDelay)
+            if !smartPunctuation { await wait(prePasteDelay) }
         } else {
             savedContents = []
+            if method == .remoteTyping && !smartPunctuation { await wait(prePasteDelay) }
         }
 
         let application = NSWorkspace.shared.frontmostApplication
         let appIdentifier = application?.bundleIdentifier ?? "unknown"
         let appName = application?.localizedName ?? appIdentifier
-        let pasteResult = await deliverText(textToDeliver, method: method, sessionID: sessionID)
+        let focusDiagnostics = PasteFocusDiagnostics(sessionID: sessionID)
+        focusDiagnostics.captureAroundPaste(processID: application?.processIdentifier, appIdentifier: appIdentifier)
+        let pasteResult = await deliverText(textToDeliver, method: method, sendKey: sendKey, sessionID: sessionID)
+        focusDiagnostics.captureAfterPaste(
+            commandPosted: pasteResult.didPostPasteCommand,
+            commandProcessID: application?.processIdentifier
+        )
         logger.notice(
             "Paste id=\(sessionID, privacy: .public) app=\(appIdentifier, privacy: .public) method=\(method.rawValue, privacy: .public) commandPosted=\(pasteResult.didPostPasteCommand, privacy: .public) queueMs=\(queueWaitMs, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt), privacy: .public)"
         )
@@ -140,12 +170,39 @@ class CursorPaster {
     }
 
     @MainActor
-    private static func deliverText(_ text: String, method: PasteMethod, sessionID: String) async -> PasteResult {
+    private static func deliverText(
+        _ text: String, method: PasteMethod, sendKey: FinishAndSendKey, sessionID: String
+    ) async -> PasteResult {
         switch method {
         case .appleScript:
             return pasteUsingAppleScript(sessionID: sessionID) ? .commandPosted : .commandNotPosted
         case .standard:
             return await pasteFromClipboard(sessionID: sessionID)
+        case .remoteTyping:
+            switch await RemoteTextTyper.type(text, sendKey: sendKey) {
+            case .posted:
+                return .commandPosted
+            case .notPosted:
+                if !text.isEmpty {
+                    NotificationManager.shared.showNotification(
+                        title: String(localized: "Remote typing could not start. Check Accessibility access and keyboard layout."),
+                        type: .error
+                    )
+                }
+                return .commandNotPosted
+            case .unsupportedCharacters:
+                NotificationManager.shared.showNotification(
+                    title: String(localized: "Remote typing could not find any characters it can type."),
+                    type: .error
+                )
+                return .commandNotPosted
+            case .partiallyPosted:
+                NotificationManager.shared.showNotification(
+                    title: String(localized: "Remote typing was interrupted. Check the destination before retrying."),
+                    type: .error
+                )
+                return .commandPartiallyPosted
+            }
         case .directTyping:
             // Never retry partial typing: a retry could duplicate text.
             let result: PasteResult
@@ -153,12 +210,6 @@ class CursorPaster {
             case .posted: result = .commandPosted
             case .notPosted: result = .commandNotPosted
             case .partiallyPosted: result = .commandPartiallyPosted
-            }
-            if !text.isEmpty && !result.didPostPasteCommand {
-                NotificationManager.shared.showNotification(
-                    title: String(localized: "Direct Typing stopped. Check the text field before trying again. Your transcription is available in History."),
-                    type: .warning
-                )
             }
             return result
         }

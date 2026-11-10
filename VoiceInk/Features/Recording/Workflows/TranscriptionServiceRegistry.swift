@@ -14,7 +14,7 @@ class TranscriptionServiceRegistry {
         modelsDirectory: modelsDirectory,
         modelProvider: modelProvider
     )
-    private(set) lazy var cloudTranscriptionService = CloudTranscriptionService(modelContext: modelContext)
+    private(set) lazy var cloudTranscriptionService = CloudTranscriptionService()
     private(set) lazy var nativeAppleTranscriptionService = NativeAppleTranscriptionService()
     private(set) lazy var fluidAudioTranscriptionService = FluidAudioTranscriptionService()
     private var cachedTranscribeCppTranscriptionService: TranscribeCppTranscriptionService?
@@ -56,13 +56,16 @@ class TranscriptionServiceRegistry {
         logger.debug(
             "Transcribing with \(model.displayName, privacy: .public) using \(String(describing: type(of: service)), privacy: .public)"
         )
-        return try await service.transcribe(audioURL: audioURL, model: model, context: context.scoped(to: model))
+        let vocabulary = context.vocabulary ?? CustomVocabularyService.shared.loadSavedVocabulary(from: modelContext)
+        return try await service.transcribe(
+            audioURL: audioURL, model: model, context: context.withVocabulary(vocabulary).scoped(to: model)
+        )
     }
 
     /// One activity record per recording/provider, including local recovery. Never recover a canceled request.
     func transcribeRecording(
         audioURL: URL, configuration: TranscriptionRuntimeConfiguration,
-        session: TranscriptionSession?, shouldCancel: () -> Bool
+        session: TranscriptionSession?, vocabulary: RecordingVocabulary, shouldCancel: () -> Bool
     ) async throws -> (text: String, modelName: String) {
         let model = configuration.model
         let duration = await AudioFileMetadata.duration(for: audioURL)
@@ -74,9 +77,9 @@ class TranscriptionServiceRegistry {
         do {
             let text: String
             if let session {
-                text = try await session.transcribe(audioURL: audioURL)
+                text = try await session.transcribe(audioURL: audioURL, vocabulary: vocabulary)
             } else {
-                text = try await transcribe(audioURL: audioURL, model: model, context: configuration.requestContext)
+                text = try await transcribe(audioURL: audioURL, model: model, context: configuration.requestContext.withVocabulary(vocabulary))
             }
             try checkCancellation()
             ProviderUsageStore.shared.record(provider: model.provider.rawValue, seconds: duration)
@@ -107,7 +110,7 @@ class TranscriptionServiceRegistry {
             do {
                 let text = try await localTranscriptionService.transcribe(
                     audioURL: audioURL, model: localModel,
-                    context: TranscriptionRequestContext(language: language, prompt: configuration.requestContext.prompt)
+                    context: TranscriptionRequestContext(language: language, prompt: configuration.requestContext.prompt, vocabulary: vocabulary)
                 )
                 try checkCancellation()
                 ProviderUsageStore.shared.record(provider: ModelProvider.whisper.rawValue, seconds: duration)
@@ -128,7 +131,6 @@ class TranscriptionServiceRegistry {
 
         if shouldUseRealtimeTranscription(for: configuration) {
             let streamingService = StreamingTranscriptionService(
-                modelContext: modelContext,
                 fluidAudioService: model.provider == .fluidAudio ? fluidAudioTranscriptionService : nil,
                 onPartialTranscript: onPartialTranscript
             )
