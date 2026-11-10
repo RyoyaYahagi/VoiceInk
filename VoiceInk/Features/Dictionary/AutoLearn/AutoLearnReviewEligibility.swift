@@ -13,4 +13,3 @@ enum AutoLearnReviewEligibility {
             && AutoLearnLocalReviewPolicy.accepts(source: source, destination: destination)
     }
 }
-
