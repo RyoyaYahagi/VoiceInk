@@ -80,10 +80,10 @@ As an open-source project, you can build VoiceInk yourself by following the inst
 音声認識の実行先、AI補正、自動学習の審査、iCloud同期はそれぞれ独立した設定・通信経路になる。
 上の「100% offline」はローカル処理を選んだ場合の説明であり、クラウド機能を使う場合には当てはまらない。
 
-## 本家2.26の試験統合（日本語）
+## フォーク正式版2.26（日本語）
 
-このブランチは本家の2.26（`4bc74cad`）を統合して検証するためのもの。
-既存のフォークのmainや、インストール済みアプリは自動で更新しない。
+このフォークのmainは本家2.26（`4bc74cad`）と独自機能を統合した正式版。
+本家の配布版とは別のアプリであり、インストール済みアプリは自動更新しない。
 本家のAuto Learn、Smart Punctuation、入力・録音・ストリーミングの改善を取り込み、
 日本語フィラー除去、WebKit入力欄の取得、利用量集計、辞書バックアップ、
 iCloud同期、ローカルビルドのデータ分離を維持する。
@@ -93,7 +93,9 @@ iCloud同期、ローカルビルドのデータ分離を維持する。
 本家の新方式に合わせ、学習は主に置換候補の提示として扱う。
 新規設定では外部AIを使わないルール審査を利用でき、必要な訂正回数を1〜3回で選べる。
 AI審査を設定した場合は自動／手動を選択できる。手動審査では「Review Now」で審査し、
-承認された候補を登録する。既存のAIプロバイダー・モデルと手動送信の設定は移行する。
+承認された候補を登録する。自動審査の場合は候補パネルで登録を承認する。
+候補パネルは10秒で自動的に却下するため、従来の自動登録とは動作が異なる。
+既存のAIプロバイダー・モデルと手動送信の設定は移行する。
 旧方式の「置換と語彙を同時登録する」審査指示は使わない。
 
 - 日本語の製品名やAIモデル名の音声認識誤りは、同じ語の表記を復元する場合に置換候補とする。
@@ -121,7 +123,7 @@ bash Tests/run-recording-speech-gate-tests.sh
 ```
 
 これらは本番の外部AIや実際のアプリ入力欄での審査・登録、iCloudの端末間同期を
-検証するものではない。試験ビルドも通常のフォークと同じデータ保存先を使うため、
+検証するものではない。正式版も従来のフォークと同じデータ保存先を使うため、
 起動して試す前に辞書を書き出して保管する。新しいAuto Learnは候補ファイルを移行するので、
 旧版へ戻しても新しい候補が旧版で読めるとは限らない。
 
@@ -143,6 +145,12 @@ VoiceInk側には、プロキシのOpenAI互換文字起こしエンドポイン
 - **状態確認**: プロキシの `/_voiceink/health` と `X-VoiceInk-Punctuation` 応答ヘッダーで確認する。
   これらは音声認識の精度やVoiceInkからの接続成功を保証するものではない。
 
+Macでの標準構成はネイティブ実行を推奨する。通常のLinuxコンテナはMacのMetal GPUを
+直接使えず、Docker化してもモデルの速度や導入負担が改善するとは限らない。
+Docker Model RunnerのGPU推論はホスト側で動く別方式であり、HaaS/Horizonの
+現在のサーバーをそのまま置き換える構成としては検証していない。
+Docker/ComposeはLinuxサーバーへの導入など、用途を限定した追加構成として検討する。
+
 自動起動・ログ出力先・接続ポートは利用環境に合わせて設定する。
 ローカル文字起こしを使っていても、AI補正やAuto Learnにクラウドを選んだ場合は
 その処理のテキストが外部送信される。
@@ -156,14 +164,23 @@ DMG を個人的に配る。
 
 - Developer ID Application 証明書
   （Xcode → Settings → Accounts → チームを選ぶ → Manage Certificates → 「+」）
-- App Store Connect API キー（`~/.appstoreconnect/private_keys/AuthKey_*.p8`）
+- 公証用のキーチェーンプロファイル、またはApp Store Connect APIキー
+- 既定の配布対象はApple Silicon・macOS 15以降。Intel版はこの配布手順では検証していない。
+
+公証の資格情報はリポジトリに保存せず、環境変数で指定する。
 
 ```shell
+export VOICEINK_NOTARY_PROFILE="your-notarytool-profile"
 make personal-dmg
 ```
 
+APIキーを直接使う場合は `VOICEINK_NOTARY_KEY`（p8のパス）、
+`VOICEINK_NOTARY_KEY_ID`、`VOICEINK_NOTARY_ISSUER` を指定する。
+署名チームは `LocalBuild.xcconfig` から読み、`VOICEINK_TEAM_ID` で上書きできる。
+
 `scripts/build-personal-dmg.sh` が archive → Developer ID で書き出し → DMG 作成 → 公証 →
-staple まで行う。出力は `~/Downloads/VoiceInk-dmg/VoiceInk.dmg`。証明書がない場合は作成手順を
+staple まで行う。公証時はDMGをAppleへ送信するが、GitHub Releasesなどへの公開はしない。
+DMGにはライセンスと、対応するソースコードのコミット・入手先を同梱する。出力は `~/Downloads/VoiceInk-dmg/VoiceInk.dmg`。証明書がない場合は作成手順を
 表示して止まる。公証を飛ばして署名と DMG だけ作る場合は `--skip-notarization`。
 
 ## このフォークを使う場合のビルドと起動（日本語）
