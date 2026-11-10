@@ -3,16 +3,17 @@ set -euo pipefail
 
 # Builds a Developer ID-signed, notarized DMG for personal distribution.
 # Requires a "Developer ID Application" certificate and an App Store Connect
-# API key for notarytool. Nothing is uploaded anywhere.
+# API key for notarytool. Notarization uploads the DMG to Apple; no public release is published.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-TEAM_ID="${VOICEINK_TEAM_ID:-2L6CD9CNHL}"
+TEAM_ID="${VOICEINK_TEAM_ID:-$(awk -F ' = ' '/^DEVELOPMENT_TEAM = / {print $2; exit}' "$REPO_ROOT/LocalBuild.xcconfig")}"
 IDENTITY="${VOICEINK_DEVELOPER_IDENTITY:-Developer ID Application}"
-NOTARY_KEY="${VOICEINK_NOTARY_KEY:-$HOME/.appstoreconnect/private_keys/AuthKey_LLRH4T7R7B.p8}"
-NOTARY_KEY_ID="${VOICEINK_NOTARY_KEY_ID:-LLRH4T7R7B}"
-NOTARY_ISSUER="${VOICEINK_NOTARY_ISSUER:-c6745991-34e1-4ed6-b003-9f975ae1fdac}"
+NOTARY_KEY="${VOICEINK_NOTARY_KEY:-}"
+NOTARY_KEY_ID="${VOICEINK_NOTARY_KEY_ID:-}"
+NOTARY_ISSUER="${VOICEINK_NOTARY_ISSUER:-}"
 OUTPUT_DIR="${VOICEINK_DMG_OUTPUT:-$HOME/Downloads/VoiceInk-dmg}"
+NOTARY_PROFILE="${VOICEINK_NOTARY_PROFILE:-}"
 SKIP_NOTARIZATION=0
 
 usage() {
@@ -48,14 +49,25 @@ MESSAGE
     exit 1
 fi
 
+if [[ "$SKIP_NOTARIZATION" -eq 0 && -z "$NOTARY_PROFILE" ]]; then
+    : "${NOTARY_KEY:?Set VOICEINK_NOTARY_KEY or VOICEINK_NOTARY_PROFILE}"
+    : "${NOTARY_KEY_ID:?Set VOICEINK_NOTARY_KEY_ID}"
+    : "${NOTARY_ISSUER:?Set VOICEINK_NOTARY_ISSUER}"
+fi
+NOTARY_ARGS=()
+if [[ -n "$NOTARY_PROFILE" ]]; then
+    NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+else
+    NOTARY_ARGS=(--key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+fi
 mkdir -p "$OUTPUT_DIR"
 ARCHIVE="$OUTPUT_DIR/VoiceInk.xcarchive"
-DERIVED="$OUTPUT_DIR/dd"
+DERIVED="${VOICEINK_DERIVED_DATA:-$OUTPUT_DIR/dd}"
 EXPORT_DIR="$OUTPUT_DIR/export"
-rm -rf "$ARCHIVE" "$DERIVED" "$EXPORT_DIR"
+rm -rf "$ARCHIVE" "$EXPORT_DIR"
 
 echo "Archiving VoiceInk..."
-xcodebuild archive \
+if ! xcodebuild archive \
     -project VoiceInk.xcodeproj \
     -scheme VoiceInk \
     -configuration Release \
@@ -64,11 +76,15 @@ xcodebuild archive \
     -xcconfig LocalBuild.xcconfig \
     CODE_SIGN_STYLE=Automatic \
     DEVELOPMENT_TEAM="$TEAM_ID" \
+    ARCHS="${VOICEINK_ARCHS:-arm64}" ONLY_ACTIVE_ARCH=NO \
     -allowProvisioningUpdates \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) LOCAL_BUILD' \
     -skipPackagePluginValidation \
     -skipMacroValidation \
-    | grep -E "error:|warning: .*sign|ARCHIVE (SUCCEEDED|FAILED)" || true
+    > "$OUTPUT_DIR/archive.log" 2>&1; then
+    tail -n 60 "$OUTPUT_DIR/archive.log" >&2
+    exit 1
+fi
 
 if [[ ! -d "$ARCHIVE" ]]; then
     echo "error: archive failed" >&2
@@ -114,9 +130,7 @@ DMG=$(VOICEINK_DMG_SIGN_IDENTITY="$IDENTITY" "$SCRIPT_DIR/package-dmg.sh" "$APP"
 if [[ "$SKIP_NOTARIZATION" -eq 0 ]]; then
     echo "Submitting for notarization..."
     SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG" \
-        --key "$NOTARY_KEY" \
-        --key-id "$NOTARY_KEY_ID" \
-        --issuer "$NOTARY_ISSUER" 2>&1)
+        "${NOTARY_ARGS[@]}" 2>&1)
     echo "$SUBMIT_OUTPUT"
     SUBMISSION_ID=$(printf '%s\n' "$SUBMIT_OUTPUT" | awk '/^[[:space:]]*id: /{print $2; exit}')
     if [[ -z "$SUBMISSION_ID" ]]; then
@@ -128,9 +142,7 @@ if [[ "$SKIP_NOTARIZATION" -eq 0 ]]; then
     # so poll the submission instead of failing the whole build.
     while true; do
         INFO=$(xcrun notarytool info "$SUBMISSION_ID" \
-            --key "$NOTARY_KEY" \
-            --key-id "$NOTARY_KEY_ID" \
-            --issuer "$NOTARY_ISSUER" 2>&1)
+            "${NOTARY_ARGS[@]}" 2>&1)
         STATUS=$(printf '%s\n' "$INFO" | awk '/status: /{print $2; exit}')
         echo "notarization status: ${STATUS:-unknown} ($SUBMISSION_ID)"
         case "$STATUS" in
@@ -138,15 +150,15 @@ if [[ "$SKIP_NOTARIZATION" -eq 0 ]]; then
             Invalid|Rejected)
                 echo "$INFO" >&2
                 xcrun notarytool log "$SUBMISSION_ID" \
-                    --key "$NOTARY_KEY" \
-                    --key-id "$NOTARY_KEY_ID" \
-                    --issuer "$NOTARY_ISSUER" >&2 || true
+                    "${NOTARY_ARGS[@]}" >&2 || true
                 exit 1
                 ;;
         esac
         sleep 20
     done
 
+    xcrun stapler staple "$APP"
+    xcrun stapler validate "$APP"
     xcrun stapler staple "$DMG"
     xcrun stapler validate "$DMG"
     spctl -a -t open --context context:primary-signature -v "$DMG"

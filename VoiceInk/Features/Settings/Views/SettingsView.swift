@@ -18,6 +18,7 @@ struct SettingsView: View {
     @AppStorage("enableAnnouncements") private var enableAnnouncements = true
     @AppStorage("restoreClipboardAfterPaste") private var restoreClipboardAfterPaste = true
     @AppStorage("clipboardRestoreDelay") private var clipboardRestoreDelay = 2.0
+    @AppStorage(SmartPunctuation.settingsKey) private var smartPunctuationEnabled = false
     @AppStorage(PasteMethod.userDefaultsKey) private var pasteMethodRawValue = PasteMethod.standard.rawValue
     @AppStorage(AppAppearancePreference.userDefaultsKey) private var appAppearancePreference = AppAppearancePreference
         .system
@@ -156,7 +157,7 @@ struct SettingsView: View {
                     isEnabled: $restoreClipboardAfterPaste,
                     label: "Keep Clipboard Content",
                     infoMessage:
-                        "Default and AppleScript temporarily use the clipboard to paste transcription. When enabled, this restores your previous clipboard content after the selected delay. Direct Typing leaves the clipboard unchanged."
+                        "Default and AppleScript temporarily use the clipboard to paste transcription. When enabled, this restores your previous clipboard content after the selected delay. Both typing methods leave the clipboard unchanged."
                 ) {
                     Picker("Restore Delay", selection: $clipboardRestoreDelay) {
                         Text("250ms").tag(0.25)
@@ -168,7 +169,14 @@ struct SettingsView: View {
                         Text("5s").tag(5.0)
                     }
                 }
-                .disabled(pasteMethodRawValue == PasteMethod.directTyping.rawValue)
+                .disabled(!(PasteMethod(rawValue: pasteMethodRawValue)?.usesClipboard ?? true))
+
+                Toggle(isOn: $smartPunctuationEnabled) {
+                    HStack(spacing: 4) {
+                        Text("Smart Punctuation")
+                        InfoTip(LocalizedStringKey("Adjust capitalization, punctuation, and spacing to fit the surrounding text when pasting. If context is unavailable, your text is pasted unchanged."))
+                    }
+                }
 
                 Picker(selection: $pasteMethodRawValue) {
                     ForEach(PasteMethod.allCases) { method in
@@ -178,7 +186,7 @@ struct SettingsView: View {
                     HStack(spacing: 4) {
                         Text("Paste Method")
                         InfoTip(
-                            "Default uses Cmd+V. AppleScript offers an alternative way to send Cmd+V. Direct Typing enters text without using the clipboard. Some editors may not support it."
+                            "Default uses Cmd+V. AppleScript offers another way to paste. Direct Typing enters text without using the clipboard and may not work in every app. Remote Desktop Typing is for remote desktops and virtual machines. Characters it cannot type are simplified or skipped."
                         )
                     }
                 }
@@ -246,6 +254,14 @@ struct SettingsView: View {
                     )
                 )
                 .disabled(launchAtLoginManager.isUpdating)
+
+                Toggle(
+                    "Automatically Check for Updates",
+                    isOn: Binding(
+                        get: { updaterViewModel.automaticallyChecksForUpdates },
+                        set: { updaterViewModel.setAutomaticallyChecksForUpdates($0) }
+                    ))
+                    .help("Checks for updates in the background while VoiceInk is running.")
 
                 Toggle("Show Announcements", isOn: $enableAnnouncements)
                     .onChange(of: enableAnnouncements) { _, newValue in
