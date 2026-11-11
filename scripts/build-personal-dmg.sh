@@ -124,6 +124,13 @@ if [[ ! -d "$APP" ]]; then
 fi
 codesign --verify --deep --strict --verbose=2 "$APP"
 
+echo "Preparing dependency notices and corresponding sources..."
+python3 "$SCRIPT_DIR/prepare-distribution.py" \
+    --source-packages "$DERIVED/SourcePackages/checkouts" \
+    --whisper-source "${VOICEINK_WHISPER_SOURCE:-$HOME/VoiceInk-Dependencies/whisper.cpp}" \
+    --cache "${VOICEINK_DISTRIBUTION_CACHE:-$OUTPUT_DIR/source-cache}" \
+    --output "$OUTPUT_DIR/distribution" --app "$APP"
+
 echo "Packaging DMG..."
 DMG=$(VOICEINK_DMG_SIGN_IDENTITY="$IDENTITY" "$SCRIPT_DIR/package-dmg.sh" "$APP" "$OUTPUT_DIR" | tail -n 1)
 
