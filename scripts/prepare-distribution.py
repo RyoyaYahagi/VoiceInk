@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -19,12 +20,15 @@ def git(repo, *args):
     return run(['git', '-C', str(repo), *args])
 
 
-def export_tree(repo, destination, revision='HEAD'):
+def export_tree(repo, destination, revision='HEAD', excluded=()):
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix='.tar') as archive:
         subprocess.run(['git', '-C', str(repo), 'archive', '--format=tar',
                         '--output', archive.name, revision], check=True)
-        subprocess.run(['tar', '-xf', archive.name, '-C', str(destination)], check=True)
+        with tarfile.open(archive.name) as source:
+            members = [m for m in source.getmembers()
+                       if not any(m.name == prefix or m.name.startswith(prefix + '/') for prefix in excluded)]
+            source.extractall(destination, members=members, filter='data')
     for entry in git(repo, 'ls-tree', '-r', revision).splitlines():
         metadata, name = entry.split('\t', 1)
         mode, _, sha = metadata.split()
@@ -93,8 +97,11 @@ def build(root, checkouts, whisper, cache, output, app, extra_sources=None):
             if git(repo, 'status', '--porcelain', '--untracked-files=no'):
                 raise RuntimeError('Modified dependency checkout: ' + name)
             target = sources / name
+            # Sparkle's test resources embed unsigned/obsolete apps, DMGs and installers.
+            # They are not used to build the distributed library or VoiceInk.
+            excluded = ['Tests/Resources'] if name == 'sparkle' else []
             if name != 'VoiceInk':
-                export_tree(repo, target, revision)
+                export_tree(repo, target, revision, excluded=excluded)
             if cargo:
                 vendor = cache / (name + '-cargo-vendor')
                 config = subprocess.check_output(['cargo', 'vendor', '--locked', '--versioned-dirs', str(vendor)], cwd=repo, text=True)
@@ -116,7 +123,7 @@ def build(root, checkouts, whisper, cache, output, app, extra_sources=None):
                     notice_paths.append(str(Path(name) / relative))
             if not notice_paths:
                 raise RuntimeError('No license or notice files found: ' + name)
-            records.append(dict(name=name, source=url, revision=revision, notices=notice_paths))
+            records.append(dict(name=name, source=url, revision=revision, notices=notice_paths, omitted_test_fixtures=excluded))
         silero = catalog['silero-vad']
         silero_license = cache / 'silero-vad-LICENSE'
         if not silero_license.exists():
@@ -135,7 +142,7 @@ def build(root, checkouts, whisper, cache, output, app, extra_sources=None):
             excluded_models=['HaaS-ja', 'Horizon'], platform='Apple Silicon / macOS 15+')
         (output / 'DEPENDENCIES.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n')
         (stage / 'DEPENDENCIES.json').write_text((output / 'DEPENDENCIES.json').read_text())
-        instructions = '''# 対応ソースとビルド手順\n\nSources/VoiceInkがこの配布のアプリ本体、他のディレクトリが依存物の固定ソースです。\n各リビジョンはDEPENDENCIES.jsonに記録しています。Swiftのサブモジュールも含みます。\n\nアプリのビルドはSources/VoiceInk/README.mdとBUILDING.mdを参照してください。\nXcode・macOS SDK・署名用証明書は別途用意します。個人の秘密鍵は含めません。\n\nネイティブ依存物:\n- Sources/whisper: ./build-xcframework.sh でWhisperをビルドします。\n- Sources/transcribe: TRANSCRIBE_XCFRAMEWORK_SLICES=macos ./scripts/ci/build_xcframework.sh\n- Sources/nemo: ./build-xcframework.sh。Rustターゲットの導入は同スクリプトを参照します。\nCargo.lockに従うRust依存ソースは各ディレクトリのvendorへ収録し、.cargo/config.tomlで参照します。\nSPMラッパーの元のバイナリURL・チェックサムはPackage.swiftに残っています。\n再生成したXCFrameworkを使う場合は、対応するbinaryTargetをローカルパスへ変更します。\nほかのSwift依存物はSources以下のPackage.swiftとロック済みリビジョンを参照してください。\n\nHaaS/Horizonのモデル・実行環境はこの配布に含めません。Silero VADの重みはアプリに同梱しています。\n各プロジェクトのライセンス・著作権表示は元のソースとDMGのLicensesに保持しています。\n'''
+        instructions = '''# 対応ソースとビルド手順\n\nSources/VoiceInkがこの配布のアプリ本体、他のディレクトリが依存物の固定ソースです。\n各リビジョンはDEPENDENCIES.jsonに記録しています。Swiftのサブモジュールも含みます。\nSparkleのTests/Resourcesにある既成のテスト用アプリ・インストーラー等は、配布アプリのビルドに不要なため除外します。\nこのテスト用配布物はDEPENDENCIES.jsonのSparkleの出所とリビジョンから入手できます。\nライブラリ本体、ビルド手順、テストのソースコード、ライセンス原文は保持します。\n\nアプリのビルドはSources/VoiceInk/README.mdとBUILDING.mdを参照してください。\nXcode・macOS SDK・署名用証明書は別途用意します。個人の秘密鍵は含めません。\n\nネイティブ依存物:\n- Sources/whisper: ./build-xcframework.sh でWhisperをビルドします。\n- Sources/transcribe: TRANSCRIBE_XCFRAMEWORK_SLICES=macos ./scripts/ci/build_xcframework.sh\n- Sources/nemo: ./build-xcframework.sh。Rustターゲットの導入は同スクリプトを参照します。\nCargo.lockに従うRust依存ソースは各ディレクトリのvendorへ収録し、.cargo/config.tomlで参照します。\nSPMラッパーの元のバイナリURL・チェックサムはPackage.swiftに残っています。\n再生成したXCFrameworkを使う場合は、対応するbinaryTargetをローカルパスへ変更します。\nほかのSwift依存物はSources以下のPackage.swiftとロック済みリビジョンを参照してください。\n\nHaaS/Horizonのモデル・実行環境はこの配布に含めません。Silero VADの重みはアプリに同梱しています。\n各プロジェクトのライセンス・著作権表示は元のソースとDMGのLicensesに保持しています。\n'''
         (stage / 'ソースの利用方法.md').write_text(instructions)
         archive = output / 'CorrespondingSource.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:
@@ -156,6 +163,8 @@ def build(root, checkouts, whisper, cache, output, app, extra_sources=None):
 
 
 if __name__ == '__main__':
+    if sys.version_info < (3, 12):
+        raise SystemExit('Python 3.12以降が必要です')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-packages', type=Path, required=True)
     parser.add_argument('--whisper-source', type=Path, required=True)

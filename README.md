@@ -235,7 +235,7 @@ open -a /Applications/VoiceInk.app
 
 配布準備処理は、ビルド時のSwiftパッケージ、Whisper、transcribe.cpp、NeMo文字処理の
 ソースとサブモジュールを収集する。Rust依存はCargo.lockに従って収録するため、
-`python3`、`git`、`cargo` と初回の取得用ネットワーク接続が必要。
+Python 3.12以降の `python3`、`git`、`cargo` と初回の取得用ネットワーク接続が必要。
 バイナリ依存物のリビジョンは `scripts/distribution-dependencies.json` で固定する。
 標準以外の場所でWhisperをビルドした場合は `VOICEINK_WHISPER_SOURCE` を指定する。
 
@@ -325,6 +325,11 @@ Apache-2.0の再配布条件は[Apache公式のライセンス本文](https://ww
 HaaS/Horizonのモデルは含めず、同梱Silero VADのライセンスは別途収録する。
 Appleの公証はライセンス条件を満たしたことを保証するものではない。
 将来の依存物・モデルの追加や差し替え時には、その版の条件と告知文書を再確認する。
+
+対応ソースにはビルドに必要な実装と手順を収録するが、Sparkleの `Tests/Resources` にある
+既成のテスト用アプリ・DMG・インストーラーは含めない。これらはVoiceInkやライブラリのビルドに
+使わず、Appleの公証では古い署名の実行ファイルとして拒否されるため。
+除外範囲と、必要な場合に元のテスト用配布物を取得できる出所・リビジョンは一覧に記録する。
 
 このフォークを本家の公式配布版と誤認させる案内はしない。
 ライセンスが公開されていることと、名称・ロゴなどの使用条件は分けて確認する。
