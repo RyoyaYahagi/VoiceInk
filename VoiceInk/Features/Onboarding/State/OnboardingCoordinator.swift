@@ -81,7 +81,7 @@ final class OnboardingCoordinator: ObservableObject {
         self.storedTranscriptionSetupKind =
             defaults.string(
                 forKey: OnboardingStorageKeys.transcriptionSetupKind
-            ) ?? OnboardingTranscriptionSetupKind.local.rawValue
+            ) ?? OnboardingTranscriptionSetupKind.haas.rawValue
         self.storedOnboardingTranscriptionProvider =
             defaults.string(
                 forKey: OnboardingStorageKeys.transcriptionProvider
@@ -260,7 +260,7 @@ final class OnboardingCoordinator: ObservableObject {
     }
 
     var transcriptionSetupKind: OnboardingTranscriptionSetupKind {
-        OnboardingTranscriptionSetupKind(rawValue: storedTranscriptionSetupKind) ?? .local
+        OnboardingTranscriptionSetupKind(rawValue: storedTranscriptionSetupKind) ?? .haas
     }
 
     var onboardingTranscriptionProviderOptions: [any CloudProvider] {
@@ -289,6 +289,8 @@ final class OnboardingCoordinator: ObservableObject {
 
     var selectedOnboardingTranscriptionModel: (any TranscriptionModel)? {
         switch transcriptionSetupKind {
+        case .haas:
+            return LocalHaasSettings.model
         case .local:
             return requiredTranscriptionModel
         case .cloud:
@@ -405,6 +407,8 @@ final class OnboardingCoordinator: ObservableObject {
 
     func isTranscriptionSetupReady(isTranscriptionModelDownloaded: Bool) -> Bool {
         switch transcriptionSetupKind {
+        case .haas:
+            return selectedOnboardingTranscriptionModel != nil && isSelectedTranscriptionProviderVerified
         case .local:
             return isTranscriptionModelDownloaded
         case .cloud:
@@ -449,6 +453,7 @@ enum OnboardingStorageKeys {
 }
 
 enum OnboardingTranscriptionSetupKind: String, CaseIterable, Identifiable {
+    case haas
     case local
     case cloud
 
@@ -456,6 +461,8 @@ enum OnboardingTranscriptionSetupKind: String, CaseIterable, Identifiable {
 
     var title: LocalizedStringKey {
         switch self {
+        case .haas:
+            return "HaaS + Horizon"
         case .local:
             return "Local"
         case .cloud:

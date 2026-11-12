@@ -30,6 +30,7 @@ enum OnboardingSettings {
 enum AppDefaults {
     static func registerDefaults() {
         AutoLearnSettings.registerDefaults()
+        LocalHaasSettings.registerDefaults()
         UserDefaults.standard.register(defaults: [
             // Onboarding & General
             OnboardingSettings.completedV2Key: false,
@@ -54,7 +55,7 @@ enum AppDefaults {
             // Recording & Transcription
             "IsTextFormattingEnabled": true,
             "IsVADEnabled": true,
-            "SelectedLanguage": "en",
+            "SelectedLanguage": "auto",
             "AppendTrailingSpace": true,
             "RecorderType": "mini",
             RecorderDisplaySettingsKeys.showLiveTranscript: true,
