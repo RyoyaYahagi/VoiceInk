@@ -23,7 +23,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ditto "$APP_PATH" "$STAGE/VoiceInk.app"
 cp "$REPO_ROOT/LICENSE" "$STAGE/LICENSE.txt"
 DISTRIBUTION="${VOICEINK_DISTRIBUTION_DIR:-$OUTPUT_DIR/distribution}"
-for required in Licenses CorrespondingSource.tar.gz DEPENDENCIES.json 第三者ソフトウェアの告知.md ソースの利用方法.md SHA256SUMS; do
+for required in Licenses CorrespondingSource.tar.gz DEPENDENCIES.json LOCAL_HAAS_RUNTIME.json LOCAL_HAAS_REQUIREMENTS.txt 第三者ソフトウェアの告知.md ソースの利用方法.md SHA256SUMS; do
     if [[ ! -e "$DISTRIBUTION/$required" ]]; then
         echo "error: distribution support missing: $required (run scripts/prepare-distribution.py)" >&2
         exit 1
