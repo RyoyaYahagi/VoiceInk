@@ -379,6 +379,16 @@ final class OnboardingFlowController {
     func refreshTranscriptionSetupVerification() {
         ensureDefaultOnboardingTranscriptionProvider()
 
+        if coordinator.transcriptionSetupKind == .haas {
+            coordinator.isSelectedTranscriptionProviderVerified = false
+            Task { @MainActor [weak self] in
+                let ready = await LocalHaasSettings.verifyService()
+                guard let self, self.coordinator.transcriptionSetupKind == .haas else { return }
+                self.coordinator.isSelectedTranscriptionProviderVerified = ready
+            }
+            return
+        }
+
         guard let provider = coordinator.selectedOnboardingTranscriptionProvider else {
             coordinator.isSelectedTranscriptionProviderVerified = false
             return

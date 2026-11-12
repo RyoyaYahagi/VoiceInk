@@ -4,7 +4,10 @@ enum TranscriptionModelRegistry {
 
     static var models: [any TranscriptionModel] {
         let cloudModels: [any TranscriptionModel] = CloudProviderRegistry.allProviders.flatMap { $0.models }
-        return predefinedModels + cloudModels + CustomCloudModelManager.shared.customModels
+        let customModels = CustomCloudModelManager.shared.customModels
+        let localDefault: [CustomCloudModel] = customModels.contains { $0.id == LocalHaasSettings.modelID }
+            ? [] : [LocalHaasSettings.model]
+        return predefinedModels + cloudModels + customModels + localDefault
     }
 
     static func model(forSelectionKey key: String, in models: [any TranscriptionModel]) -> (any TranscriptionModel)? {

@@ -2,14 +2,14 @@ import AppKit
 import Foundation
 
 enum StarterModeFactory {
-    static let defaultTranscriptionModelName = "parakeet-tdt-0.6b-v3"
+    static let defaultTranscriptionModelName = LocalHaasSettings.selectionKey
 
     static func install(
         kinds: [StarterModeKind],
         provider: AIProvider,
         modelName: String?,
         transcriptionModelName: String = defaultTranscriptionModelName,
-        isRealtimeTranscriptionEnabled: Bool = true,
+        isRealtimeTranscriptionEnabled: Bool = false,
         selectedLanguage: String = "auto",
         installedApps: [InstalledAppInfo]? = nil
     ) {
