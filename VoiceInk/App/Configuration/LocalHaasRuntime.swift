@@ -62,7 +62,8 @@ final class LocalHaasRuntime: ObservableObject {
             isReady = true
             verifiedThisLaunch = true
         } catch {
-            errorMessage = error is CancellationError ? "ダウンロードを中止しました。再試行できます。" : error.localizedDescription
+            let wasCancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
+            errorMessage = wasCancelled ? "ダウンロードを中止しました。再試行できます。" : error.localizedDescription
             throw error
         }
     }

@@ -7,6 +7,13 @@ final class OfflineProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+final class CancelledDownloadProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.cancelled)) }
+    override func stopLoading() {}
+}
+
 @main
 struct LocalHaasRuntimeTests {
     @MainActor static func main() async throws {
@@ -38,6 +45,28 @@ struct LocalHaasRuntimeTests {
             fatalError("Traversal must be rejected")
         } catch LocalHaasError.invalidDownload { print("PASS: unsafe model path rejected") }
         print("PASS: verified local files install without network; completion marker required")
+
+        // URLSession reports a cancelled download as URLError, not Swift CancellationError.
+        let fixtureRuntime = root.appendingPathComponent("runtime")
+        let fixturePython = fixtureRuntime.appendingPathComponent("python/bin")
+        try FileManager.default.createDirectory(at: fixturePython, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: fixturePython.appendingPathComponent("python3.13"),
+            withDestinationURL: URL(fileURLWithPath: "/usr/bin/true"))
+        try Data().write(to: fixtureRuntime.appendingPathComponent("libspeech.4.dylib"))
+        try JSONEncoder().encode([file]).write(to: fixtureRuntime.appendingPathComponent("models.json"))
+        let cancellationConfig = URLSessionConfiguration.ephemeral
+        cancellationConfig.protocolClasses = [CancelledDownloadProtocol.self]
+        let cancellationRuntime = LocalHaasRuntime(runtimeURL: fixtureRuntime,
+            modelsURL: root.appendingPathComponent("cancelled-download"),
+            session: URLSession(configuration: cancellationConfig))
+        do {
+            try await cancellationRuntime.prepare()
+            fatalError("Cancelled download must fail")
+        } catch let error as URLError where error.code == .cancelled {}
+        precondition(cancellationRuntime.errorMessage == "ダウンロードを中止しました。再試行できます。",
+            "Cancelled URLSession download must show the Japanese retry guidance")
+        precondition(!cancellationRuntime.isDownloading && !cancellationRuntime.isReady)
+        print("PASS: cancelled URLSession download shows retry guidance and clears busy state")
 
         let ticket = LocalHaasProcess()
         let cancel = Task {
