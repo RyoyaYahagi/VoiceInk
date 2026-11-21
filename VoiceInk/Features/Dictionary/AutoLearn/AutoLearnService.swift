@@ -373,6 +373,16 @@ actor AutoLearnService {
         } while valueSampleRequested
     }
 
+    /// 以前は監視できていたアプリで続けて失敗しているときは、その旨を伝える。
+    /// アプリの更新で読み取り方が変わった可能性に利用者が気づけるようにするため。
+    private static func captureFailureTitle(app: AutoLearnAppIdentity, health: AutoLearnAppHealthStatus) -> String {
+        guard case .stoppedWorking(_, let previous, let current) = health else {
+            return "この入力欄では自動学習できません。誤認識した語は手動で登録できます。"
+        }
+        let update = previous.flatMap { previous in current.map { "（\(previous) → \($0) の更新後から）" } } ?? ""
+        return "\(app.appName) で自動学習ができなくなっています\(update)。誤認識した語は手動で登録できます。"
+    }
+
     /// Web 系エディタ（Chromium / Electron）は貼り付けの反映や
     /// アクセシビリティツリーの構築が遅れることがあり、初回の読み取りで
     /// 貼り付けた文字列が見つからない場合がある。その場合だけ少し待って読み直す。
@@ -435,15 +445,20 @@ actor AutoLearnService {
         case nil:
             return
         case .rejected(let reason):
-            await MainActor.run {
+            let health = await MainActor.run {
                 AutoLearnStatsStore.shared.recordCaptureFailure(reason: reason, app: app)
+            }
+            if case .stoppedWorking(let failures, let previous, let current) = health {
+                logger.notice(
+                    "Auto Learn stopped working app=\(app.appID, privacy: .public) consecutiveFailures=\(failures, privacy: .public) previousVersion=\(previous ?? "-", privacy: .public) currentVersion=\(current ?? "-", privacy: .public)"
+                )
             }
             guard lifecycleGeneration == generation, !Task.isCancelled, AutoLearnSettings.isEnabled,
                 UserDefaults.standard.object(forKey: "VoiceInkManualCorrectionHint") as? Bool ?? true,
                 let modelContainer else { return }
             await MainActor.run {
                 NotificationManager.shared.showNotification(
-                    title: "この入力欄では自動学習できません。誤認識した語は手動で登録できます。",
+                    title: Self.captureFailureTitle(app: app, health: health),
                     type: .warning, duration: 15,
                     actionButton: ("修正を登録", {
                         DictionaryQuickAddManager.shared.show(modelContainer: modelContainer, initialMode: .replacement)
