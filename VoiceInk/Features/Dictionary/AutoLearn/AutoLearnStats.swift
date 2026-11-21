@@ -5,6 +5,14 @@ import SwiftUI
 struct AutoLearnAppIdentity: Sendable, Equatable {
     let appID: String
     let appName: String
+    /// CFBundleShortVersionString of the target app, when available.
+    let appVersion: String?
+
+    init(appID: String, appName: String, appVersion: String? = nil) {
+        self.appID = appID
+        self.appName = appName
+        self.appVersion = appVersion
+    }
 
     static let unknown = AutoLearnAppIdentity(appID: "unknown", appName: "不明なアプリ")
 }
@@ -44,10 +52,12 @@ final class AutoLearnStatsStore: ObservableObject {
 
     @Published private(set) var captureEntries: [AutoLearnCaptureStatEntry]
     @Published private(set) var reviewEntries: [AutoLearnReviewUsageEntry]
+    @Published private(set) var healthRecords: [AutoLearnAppHealthRecord]
 
     private let defaults: UserDefaults
     private let captureKey = "VoiceInkAutoLearnCaptureStatsV1"
     private let reviewKey = "VoiceInkAutoLearnReviewUsageV1"
+    private let healthKey = "VoiceInkAutoLearnAppHealthV1"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -56,6 +66,9 @@ final class AutoLearnStatsStore: ObservableObject {
         } ?? []
         reviewEntries = defaults.data(forKey: reviewKey).flatMap {
             try? JSONDecoder().decode([AutoLearnReviewUsageEntry].self, from: $0)
+        } ?? []
+        healthRecords = defaults.data(forKey: healthKey).flatMap {
+            try? JSONDecoder().decode([AutoLearnAppHealthRecord].self, from: $0)
         } ?? []
     }
 
@@ -72,13 +85,51 @@ final class AutoLearnStatsStore: ObservableObject {
 
     func recordObservationArmed(app: AutoLearnAppIdentity, date: Date = Date()) {
         upsert(app: app, month: Self.month(for: date)) { $0.observationsArmed += 1 }
+        updateHealth(app: app) { $0.recordSuccess(version: app.appVersion, at: date) }
     }
 
-    func recordCaptureFailure(reason: String, app: AutoLearnAppIdentity, date: Date = Date()) {
+    /// Returns the app's health after this failure.
+    @discardableResult
+    func recordCaptureFailure(reason: String, app: AutoLearnAppIdentity, date: Date = Date()) -> AutoLearnAppHealthStatus {
         upsert(app: app, month: Self.month(for: date)) { $0.captureFailures += 1 }
         if Self.readFailureReasons.contains(reason) {
             recordFieldReadFailure(reason: reason, app: app, date: date)
         }
+        guard AutoLearnAppHealthRecord.healthReasons.contains(reason) else {
+            return health(for: app.appID)?.status ?? .healthy
+        }
+        return updateHealth(app: app) { $0.recordFailure(reason: reason, version: app.appVersion, at: date) }
+    }
+
+    func health(for appID: String) -> AutoLearnAppHealthRecord? {
+        healthRecords.first { $0.appID == appID }
+    }
+
+    @discardableResult
+    private func updateHealth(
+        app: AutoLearnAppIdentity,
+        mutate: (inout AutoLearnAppHealthRecord) -> Void
+    ) -> AutoLearnAppHealthStatus {
+        guard app.appID != AutoLearnAppIdentity.unknown.appID else { return .healthy }
+        let index: Int
+        if let existing = healthRecords.firstIndex(where: { $0.appID == app.appID }) {
+            index = existing
+        } else {
+            healthRecords.append(AutoLearnAppHealthRecord(appID: app.appID, appName: app.appName))
+            index = healthRecords.count - 1
+        }
+        healthRecords[index].appName = app.appName
+        mutate(&healthRecords[index])
+        let status = healthRecords[index].status
+        // Keep the apps used most recently; old ones carry no diagnostic value.
+        healthRecords = Array(healthRecords
+            .sorted { max($0.lastSuccessAt ?? .distantPast, $0.lastFailureAt ?? .distantPast)
+                > max($1.lastSuccessAt ?? .distantPast, $1.lastFailureAt ?? .distantPast) }
+            .prefix(50))
+        if let data = try? JSONEncoder().encode(healthRecords) {
+            defaults.set(data, forKey: healthKey)
+        }
+        return status
     }
 
     private static let readFailureReasons: Set<String> = [
@@ -176,6 +227,17 @@ struct AutoLearnCaptureStatsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("アプリごとの貼り付け後の監視回数と、入力欄を読めなかった回数・理由を月別（UTC）に集計します。文字起こしの内容そのものは保存しません。")
                     .font(.caption).foregroundStyle(.secondary)
+                let attention = store.healthRecords.filter { $0.status != .healthy }
+                if !attention.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(attention) { record in
+                            Label(Self.healthMessage(for: record), systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
                 let visible = store.captureEntries.filter(hasActivity)
                 if visible.isEmpty {
                     Text("まだ記録はありません。")
@@ -225,6 +287,28 @@ struct AutoLearnCaptureStatsView: View {
         }
         guard !fragments.isEmpty else { return nil }
         return fragments.joined(separator: " · ")
+    }
+
+    static func healthMessage(for record: AutoLearnAppHealthRecord) -> String {
+        let reason = record.lastFailureReason.flatMap(reasonLabel) ?? "不明"
+        let last = record.lastFailureAt.map {
+            " 最後の失敗: \($0.formatted(date: .numeric, time: .shortened))（\(reason)）。"
+        } ?? ""
+        switch record.status {
+        case .healthy:
+            return ""
+        case .neverWorked(let failures):
+            return "\(record.appName): まだ一度も監視できていません（\(failures) 回連続で失敗）。\(last)"
+        case .stoppedWorking(let failures, let previous, let current):
+            let since = record.lastSuccessAt.map { "\($0.formatted(date: .numeric, time: .omitted)) までは監視できていましたが、" } ?? "以前は監視できていましたが、"
+            let update: String
+            if let previous, let current {
+                update = " \(previous) から \(current) への更新後に起きています。"
+            } else {
+                update = ""
+            }
+            return "\(record.appName): \(since)\(failures) 回連続で入力欄を読めていません。\(update)\(last)"
+        }
     }
 
     static func reasonLabel(_ reason: String) -> String? {

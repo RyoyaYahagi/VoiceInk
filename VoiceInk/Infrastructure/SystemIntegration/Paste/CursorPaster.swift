@@ -119,6 +119,8 @@ class CursorPaster {
         let application = NSWorkspace.shared.frontmostApplication
         let appIdentifier = application?.bundleIdentifier ?? "unknown"
         let appName = application?.localizedName ?? appIdentifier
+        let appVersion = application?.bundleURL
+            .flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
         let focusDiagnostics = PasteFocusDiagnostics(sessionID: sessionID)
         focusDiagnostics.captureAroundPaste(processID: application?.processIdentifier, appIdentifier: appIdentifier)
         let pasteResult = await deliverText(textToDeliver, method: method, sendKey: sendKey, sessionID: sessionID)
@@ -134,7 +136,7 @@ class CursorPaster {
             autoLearnGeneration = await AutoLearnService.shared.pasteDidFinish(
                 text: textToDeliver,
                 processID: application?.processIdentifier,
-                app: AutoLearnAppIdentity(appID: appIdentifier, appName: appName),
+                app: AutoLearnAppIdentity(appID: appIdentifier, appName: appName, appVersion: appVersion),
                 commandPosted: pasteResult.didPostPasteCommand
             )
         } else {
