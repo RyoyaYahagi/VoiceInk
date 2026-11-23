@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # Builds a Developer ID-signed, notarized DMG for personal distribution.
-# Requires a "Developer ID Application" certificate and an App Store Connect
-# API key for notarytool. Notarization uploads the DMG to Apple; no public release is published.
+# Requires a "Developer ID Application" certificate and, for notarytool, either a
+# keychain profile (VOICEINK_NOTARY_PROFILE) or an App Store Connect API key
+# (VOICEINK_NOTARY_KEY, _KEY_ID, _ISSUER). Notarization uploads the DMG to Apple;
+# no public release is published.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
