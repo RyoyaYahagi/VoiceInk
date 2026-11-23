@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Packages a built VoiceInk.app with its license and corresponding-source reference.
+# Packages a built VoiceInk.app with its license, third-party notices and the
+# corresponding source archive (CorrespondingSource.tar.gz), plus a source link.
 APP_PATH="${1:-${VOICEINK_APP_PATH:-$HOME/Downloads/VoiceInk.app}}"
 OUTPUT_DIR="${2:-${VOICEINK_DMG_OUTPUT:-$HOME/Downloads/VoiceInk-dmg}}"
 

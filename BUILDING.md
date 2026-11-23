@@ -17,7 +17,7 @@ open ~/Downloads/VoiceInk.app
 
 `make local` prepares `whisper.xcframework` in `~/VoiceInk-Dependencies`, builds Release in `.local-build`, and copies `VoiceInk.app` to `~/Downloads`.
 
-It uses `LocalBuild.xcconfig`, `VoiceInk.local.entitlements`, and the `LOCAL_BUILD` Swift flag. Without an override, it uses the only available Apple Development identity or falls back to ad-hoc signing when none or multiple are found.
+It uses `LocalBuild.xcconfig`, `VoiceInk.local.entitlements`, and the `LOCAL_BUILD` Swift flag. Without an override, it signs with automatic `Apple Development` signing and requires a valid identity; there is no automatic fallback to ad-hoc signing.
 
 Choose an identity explicitly:
 
